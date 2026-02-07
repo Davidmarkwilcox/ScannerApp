@@ -6,26 +6,28 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		8A126C0C2F37CC1200DCE03F /* ScannerAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A126C0B2F37CC1200DCE03F /* ScannerAppApp.swift */; };
+		8A126C0E2F37CC1200DCE03F /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A126C0D2F37CC1200DCE03F /* ContentView.swift */; };
+		8A126C102F37CC1600DCE03F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8A126C0F2F37CC1600DCE03F /* Assets.xcassets */; };
+		8A126C122F37CC1600DCE03F /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A126C112F37CC1600DCE03F /* Persistence.swift */; };
+		8A126C152F37CC1600DCE03F /* ScannerApp.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 8A126C132F37CC1600DCE03F /* ScannerApp.xcdatamodeld */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		8A126C082F37CC1200DCE03F /* ScannerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScannerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A126C0B2F37CC1200DCE03F /* ScannerAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerAppApp.swift; sourceTree = "<group>"; };
+		8A126C0D2F37CC1200DCE03F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		8A126C0F2F37CC1600DCE03F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8A126C112F37CC1600DCE03F /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		8A126C142F37CC1600DCE03F /* ScannerApp.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ScannerApp.xcdatamodel; sourceTree = "<group>"; };
+		8A126C162F37CC1600DCE03F /* ScannerApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScannerApp.entitlements; sourceTree = "<group>"; };
+		8A126C172F37CC1600DCE03F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		8A126C182F37CC1600DCE03F /* Exceptions for "ScannerApp" folder in "ScannerApp" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 8A126C072F37CC1200DCE03F /* ScannerApp */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8A126C0A2F37CC1200DCE03F /* ScannerApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				8A126C182F37CC1600DCE03F /* Exceptions for "ScannerApp" folder in "ScannerApp" target */,
-			);
 			path = ScannerApp;
 			sourceTree = "<group>";
 		};
@@ -45,6 +47,12 @@
 		8A126BFF2F37CC1200DCE03F = {
 			isa = PBXGroup;
 			children = (
+				8A126C1E2F37D1D100DCE03F /* App */,
+				8A126C232F37D20700DCE03F /* UI */,
+				8A126C222F37D1FD00DCE03F /* Core */,
+				8A126C212F37D1F100DCE03F /* Resources */,
+				8A126C202F37D1EA00DCE03F /* Data */,
+				8A126C1F2F37D1E100DCE03F /* Packages */,
 				8A126C0A2F37CC1200DCE03F /* ScannerApp */,
 				8A126C092F37CC1200DCE03F /* Products */,
 			);
@@ -56,6 +64,103 @@
 				8A126C082F37CC1200DCE03F /* ScannerApp.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8A126C1E2F37D1D100DCE03F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C0B2F37CC1200DCE03F /* ScannerAppApp.swift */,
+				8A126C172F37CC1600DCE03F /* Info.plist */,
+				8A126C162F37CC1600DCE03F /* ScannerApp.entitlements */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		8A126C1F2F37D1E100DCE03F /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		8A126C202F37D1EA00DCE03F /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C132F37CC1600DCE03F /* ScannerApp.xcdatamodeld */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		8A126C212F37D1F100DCE03F /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C0F2F37CC1600DCE03F /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		8A126C222F37D1FD00DCE03F /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C262F37D23500DCE03F /* Models */,
+				8A126C252F37D22C00DCE03F /* Services */,
+				8A126C242F37D21E00DCE03F /* Persistence */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		8A126C232F37D20700DCE03F /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C292F37D25A00DCE03F /* Screens */,
+				8A126C282F37D24F00DCE03F /* Components */,
+				8A126C272F37D24700DCE03F /* Styles */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		8A126C242F37D21E00DCE03F /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C112F37CC1600DCE03F /* Persistence.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		8A126C252F37D22C00DCE03F /* Services */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		8A126C262F37D23500DCE03F /* Models */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		8A126C272F37D24700DCE03F /* Styles */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Styles;
+			sourceTree = "<group>";
+		};
+		8A126C282F37D24F00DCE03F /* Components */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		8A126C292F37D25A00DCE03F /* Screens */ = {
+			isa = PBXGroup;
+			children = (
+				8A126C0D2F37CC1200DCE03F /* ContentView.swift */,
+			);
+			path = Screens;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -122,6 +227,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A126C102F37CC1600DCE03F /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -132,6 +238,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A126C122F37CC1600DCE03F /* Persistence.swift in Sources */,
+				8A126C0E2F37CC1200DCE03F /* ContentView.swift in Sources */,
+				8A126C152F37CC1600DCE03F /* ScannerApp.xcdatamodeld in Sources */,
+				8A126C0C2F37CC1200DCE03F /* ScannerAppApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -349,6 +459,19 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCVersionGroup section */
+		8A126C132F37CC1600DCE03F /* ScannerApp.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				8A126C142F37CC1600DCE03F /* ScannerApp.xcdatamodel */,
+			);
+			currentVersion = 8A126C142F37CC1600DCE03F /* ScannerApp.xcdatamodel */;
+			path = ScannerApp.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
 	};
 	rootObject = 8A126C002F37CC1200DCE03F /* Project object */;
 }
