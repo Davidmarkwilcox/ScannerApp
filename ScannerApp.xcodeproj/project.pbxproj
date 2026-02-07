@@ -18,6 +18,8 @@
 		8A96EC302F37E1DA00FFE256 /* ViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC2F2F37E1DA00FFE256 /* ViewerView.swift */; };
 		8A96EC322F37E1E900FFE256 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC312F37E1E900FFE256 /* SettingsView.swift */; };
 		8A96EC342F37EAC500FFE256 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC332F37EAC500FFE256 /* Theme.swift */; };
+		8A96EC432F3806D600FFE256 /* ScannerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8A96EC422F3806D600FFE256 /* ScannerKit */; };
+		8A96EC462F38074A00FFE256 /* ScannedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC452F38074A00FFE256 /* ScannedPage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +37,11 @@
 		8A96EC2F2F37E1DA00FFE256 /* ViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerView.swift; sourceTree = "<group>"; };
 		8A96EC312F37E1E900FFE256 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		8A96EC332F37EAC500FFE256 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		8A96EC382F38053300FFE256 /* ScannerKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerKit.swift; sourceTree = "<group>"; };
+		8A96EC3B2F38053300FFE256 /* ScannerKitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerKitTests.swift; sourceTree = "<group>"; };
+		8A96EC3E2F38053300FFE256 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
+		8A96EC3F2F38053300FFE256 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		8A96EC452F38074A00FFE256 /* ScannedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannedPage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -50,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A96EC432F3806D600FFE256 /* ScannerKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,6 +99,7 @@
 		8A126C1F2F37D1E100DCE03F /* Packages */ = {
 			isa = PBXGroup;
 			children = (
+				8A96EC402F38053300FFE256 /* ScannerKit */,
 			);
 			path = Packages;
 			sourceTree = "<group>";
@@ -181,6 +190,58 @@
 			path = Screens;
 			sourceTree = "<group>";
 		};
+		8A96EC392F38053300FFE256 /* ScannerKit */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC382F38053300FFE256 /* ScannerKit.swift */,
+			);
+			path = ScannerKit;
+			sourceTree = "<group>";
+		};
+		8A96EC3A2F38053300FFE256 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC442F38073700FFE256 /* Models */,
+				8A96EC392F38053300FFE256 /* ScannerKit */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		8A96EC3C2F38053300FFE256 /* ScannerKitTests */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC3B2F38053300FFE256 /* ScannerKitTests.swift */,
+			);
+			path = ScannerKitTests;
+			sourceTree = "<group>";
+		};
+		8A96EC3D2F38053300FFE256 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC3C2F38053300FFE256 /* ScannerKitTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		8A96EC402F38053300FFE256 /* ScannerKit */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC3A2F38053300FFE256 /* Sources */,
+				8A96EC3D2F38053300FFE256 /* Tests */,
+				8A96EC3E2F38053300FFE256 /* .gitignore */,
+				8A96EC3F2F38053300FFE256 /* Package.swift */,
+			);
+			path = ScannerKit;
+			sourceTree = "<group>";
+		};
+		8A96EC442F38073700FFE256 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC452F38074A00FFE256 /* ScannedPage.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -201,6 +262,7 @@
 			);
 			name = ScannerApp;
 			packageProductDependencies = (
+				8A96EC422F3806D600FFE256 /* ScannerKit */,
 			);
 			productName = ScannerApp;
 			productReference = 8A126C082F37CC1200DCE03F /* ScannerApp.app */;
@@ -230,6 +292,9 @@
 			);
 			mainGroup = 8A126BFF2F37CC1200DCE03F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8A96EC412F3806D600FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8A126C092F37CC1200DCE03F /* Products */;
 			projectDirPath = "";
@@ -260,6 +325,7 @@
 				8A126C122F37CC1600DCE03F /* Persistence.swift in Sources */,
 				8A126C0E2F37CC1200DCE03F /* ContentView.swift in Sources */,
 				8A96EC322F37E1E900FFE256 /* SettingsView.swift in Sources */,
+				8A96EC462F38074A00FFE256 /* ScannedPage.swift in Sources */,
 				8A126C152F37CC1600DCE03F /* ScannerApp.xcdatamodeld in Sources */,
 				8A96EC2A2F37E1A800FFE256 /* LibraryView.swift in Sources */,
 				8A126C0C2F37CC1200DCE03F /* ScannerAppApp.swift in Sources */,
@@ -483,6 +549,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		8A96EC412F3806D600FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ScannerKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8A96EC422F3806D600FFE256 /* ScannerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScannerKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCVersionGroup section */
 		8A126C132F37CC1600DCE03F /* ScannerApp.xcdatamodeld */ = {
