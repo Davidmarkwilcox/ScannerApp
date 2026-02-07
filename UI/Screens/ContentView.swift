@@ -1,86 +1,88 @@
+// ContentView.swift
+// File: ContentView.swift
+// Description: App-level navigation shell for ScannerApp. Hosts the root UI (tabs + navigation) and provides
+// lightweight debug plumbing shared across screens (debug default Off). Applies Theme defaults.
 //
-//  ContentView.swift
-//  ScannerApp
-//
-//  Created by David Wilcox on 2/7/26.
-//
-
+// Section 1. Imports
 import SwiftUI
-import CoreData
 
+// Section 2. Debug (default Off)
+// Note: Central debug helper kept here for now; can be promoted to Core/Services later.
+enum ScannerDebug {
+    static let isEnabled: Bool = false
+
+    static func writeLog(_ message: String, filename: String = "ScannerApp_DebugLog.txt") {
+        guard isEnabled else { return }
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(stamp)] \(message)\n"
+
+        do {
+            let docs = try FileManager.default.url(for: .documentDirectory,
+                                                  in: .userDomainMask,
+                                                  appropriateFor: nil,
+                                                  create: true)
+            let url = docs.appendingPathComponent(filename)
+
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                if let data = line.data(using: .utf8) {
+                    try handle.write(contentsOf: data)
+                }
+                try handle.close()
+            } else {
+                try line.write(to: url, atomically: true, encoding: .utf8)
+            }
+        } catch {
+            // Avoid impacting UX.
+        }
+    }
+}
+
+// Section 3. ContentView
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+    // Section 3.1 State
+    enum Tab: Hashable {
+        case library
+        case scan
+        case settings
+    }
 
+    @State private var selectedTab: Tab = .library
+
+    // Section 3.2 Body
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        TabView(selection: $selectedTab) {
+
+            NavigationStack {
+                LibraryView()
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+            .tabItem { Label("Library", systemImage: "doc.on.doc") }
+            .tag(Tab.library)
+
+            NavigationStack {
+                ScanView()
             }
-            Text("Select an item")
+            .tabItem { Label("Scan", systemImage: "camera.viewfinder") }
+            .tag(Tab.scan)
+
+            NavigationStack {
+                SettingsView()
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
+            .tag(Tab.settings)
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+        .scannerScreen()
+        .onAppear {
+            ScannerDebug.writeLog("ContentView appeared")
         }
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
-
+// Section 4. Preview
 #Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    ContentView()
 }
+
+// End of file: ContentView.swift
