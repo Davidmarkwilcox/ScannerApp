@@ -33,13 +33,6 @@ struct LibraryView: View {
                         .foregroundStyle(Theme.Colors.textPrimary)
 
                     NavigationLink {
-                        ReviewView()
-                    } label: {
-                        Label("Go to Review", systemImage: "slider.horizontal.3")
-                            .font(Theme.Typography.body)
-                    }
-
-                    NavigationLink {
                         ViewerView()
                     } label: {
                         Label("Go to Viewer", systemImage: "doc.text.magnifyingglass")
