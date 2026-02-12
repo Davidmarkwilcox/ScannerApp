@@ -22,6 +22,8 @@
 		8A96EC462F38074A00FFE256 /* ScannedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC452F38074A00FFE256 /* ScannedPage.swift */; };
 		8A96EC492F38095100FFE256 /* DocumentCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC482F38095100FFE256 /* DocumentCamera.swift */; };
 		8A96EC4B2F38096200FFE256 /* DocumentCameraCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC4A2F38096200FFE256 /* DocumentCameraCoordinator.swift */; };
+		8A96EC662F3D776800FFE256 /* Debug.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A96EC652F3D776800FFE256 /* Debug.swift */; };
+		8A96EC692F3D77D400FFE256 /* ScannerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 8A96EC682F3D77D400FFE256 /* ScannerKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +48,7 @@
 		8A96EC452F38074A00FFE256 /* ScannedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannedPage.swift; sourceTree = "<group>"; };
 		8A96EC482F38095100FFE256 /* DocumentCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentCamera.swift; sourceTree = "<group>"; };
 		8A96EC4A2F38096200FFE256 /* DocumentCameraCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentCameraCoordinator.swift; sourceTree = "<group>"; };
+		8A96EC652F3D776800FFE256 /* Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Debug.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -61,6 +64,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A96EC692F3D77D400FFE256 /* ScannerKit in Frameworks */,
 				8A96EC432F3806D600FFE256 /* ScannerKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -78,6 +82,7 @@
 				8A126C202F37D1EA00DCE03F /* Data */,
 				8A126C1F2F37D1E100DCE03F /* Packages */,
 				8A126C0A2F37CC1200DCE03F /* ScannerApp */,
+				8A96EC5F2F3AD5FD00FFE256 /* Frameworks */,
 				8A126C092F37CC1200DCE03F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -137,6 +142,7 @@
 		8A126C232F37D20700DCE03F /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				8A96EC642F3D774D00FFE256 /* Utilities */,
 				8A126C292F37D25A00DCE03F /* Screens */,
 				8A126C282F37D24F00DCE03F /* Components */,
 				8A126C272F37D24700DCE03F /* Styles */,
@@ -250,10 +256,25 @@
 		8A96EC472F38093300FFE256 /* Capture */ = {
 			isa = PBXGroup;
 			children = (
-				8A96EC482F38095100FFE256 /* DocumentCamera.swift */,
 				8A96EC4A2F38096200FFE256 /* DocumentCameraCoordinator.swift */,
+				8A96EC482F38095100FFE256 /* DocumentCamera.swift */,
 			);
 			path = Capture;
+			sourceTree = "<group>";
+		};
+		8A96EC5F2F3AD5FD00FFE256 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		8A96EC642F3D774D00FFE256 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				8A96EC652F3D776800FFE256 /* Debug.swift */,
+			);
+			path = Utilities;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -277,6 +298,7 @@
 			name = ScannerApp;
 			packageProductDependencies = (
 				8A96EC422F3806D600FFE256 /* ScannerKit */,
+				8A96EC682F3D77D400FFE256 /* ScannerKit */,
 			);
 			productName = ScannerApp;
 			productReference = 8A126C082F37CC1200DCE03F /* ScannerApp.app */;
@@ -307,7 +329,7 @@
 			mainGroup = 8A126BFF2F37CC1200DCE03F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				8A96EC412F3806D600FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */,
+				8A96EC672F3D77D400FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8A126C092F37CC1200DCE03F /* Products */;
@@ -340,6 +362,7 @@
 				8A126C0E2F37CC1200DCE03F /* ContentView.swift in Sources */,
 				8A96EC322F37E1E900FFE256 /* SettingsView.swift in Sources */,
 				8A96EC462F38074A00FFE256 /* ScannedPage.swift in Sources */,
+				8A96EC662F3D776800FFE256 /* Debug.swift in Sources */,
 				8A126C152F37CC1600DCE03F /* ScannerApp.xcdatamodeld in Sources */,
 				8A96EC2A2F37E1A800FFE256 /* LibraryView.swift in Sources */,
 				8A126C0C2F37CC1200DCE03F /* ScannerAppApp.swift in Sources */,
@@ -567,7 +590,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		8A96EC412F3806D600FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */ = {
+		8A96EC672F3D77D400FFE256 /* XCLocalSwiftPackageReference "Packages/ScannerKit" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ScannerKit;
 		};
@@ -575,6 +598,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		8A96EC422F3806D600FFE256 /* ScannerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ScannerKit;
+		};
+		8A96EC682F3D77D400FFE256 /* ScannerKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ScannerKit;
 		};

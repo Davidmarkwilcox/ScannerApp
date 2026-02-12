@@ -1,26 +1,41 @@
-// swift-tools-version: 6.2
-// The swift-tools-version declares the minimum version of Swift required to build this package.
+// swift-tools-version: 5.9
+//
+//  Package.swift
+//  ScannerKit
+//
+//  Defines the ScannerKit Swift Package.
+//  - ScannerKit: Core, UI-agnostic models + capture utilities.
+//
+//  NOTE:
+//  Sources are organized as sibling folders under Sources/ (Capture, Models, ScannerKit).
+//  SwiftPM only auto-discovers Sources/<TargetName>/..., so we explicitly map sources.
+//
 
 import PackageDescription
 
 let package = Package(
     name: "ScannerKit",
+    platforms: [
+        .iOS(.v16)
+    ],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "ScannerKit",
             targets: ["ScannerKit"]
         ),
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
+        // 1) Core module: includes Sources/Capture, Sources/Models, Sources/ScannerKit
         .target(
-            name: "ScannerKit"
-        ),
-        .testTarget(
-            name: "ScannerKitTests",
-            dependencies: ["ScannerKit"]
+            name: "ScannerKit",
+            path: "Sources",
+            sources: [
+                "Capture",
+                "Models",
+                "ScannerKit"
+            ]
         ),
     ]
 )
+
+// Package.swift

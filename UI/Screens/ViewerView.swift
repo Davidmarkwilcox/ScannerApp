@@ -45,7 +45,8 @@ struct ViewerView: View {
         .scannerScreen()
         .navigationTitle("Viewer")
         .onAppear {
-            if ScannerDebug.isEnabled { ScannerDebug.writeLog("ViewerView appeared") }
+            if ScannerDebug.isEnabled { //ScannerDebug.writeLog("ViewerView appeared")
+            }
         }
     }
 }
