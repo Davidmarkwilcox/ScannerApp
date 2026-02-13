@@ -1,20 +1,20 @@
 // ScannerDraftPersistence.swift
 // File: ScannerDraftPersistence.swift
 // Description:
-// File-based draft persistence for ScannerKit.
-// - Creates a new document UUID and directory structure under Application Support/Scanner/Documents/<UUID>/
+// File-based persistence for ScannerKit documents.
+// - Creates/updates a document directory under Application Support/Scanner/Documents/<UUID>/
 // - Writes metadata.json for Library listing.
-// - Writes thumbnail.jpg (from first page; rendered thumbnail with fallback to compressed full image).
-// - Writes each page as a JPEG into pages/###.jpg (no PDF generation yet).
+// - Writes thumbnail.jpg (from first page; rendered thumbnail with fallback).
+// - Writes each page as a JPEG into pages/###.jpg.
+// - Provides finalizeDocument(...) to generate output/document.pdf and update metadata state.
 //
 // Interactions:
 // - Uses ScannerDocumentPaths (ScannerDocumentPaths.swift) and ScannerPaths (ScannerPaths.swift).
 // - Uses ScannerDocumentMetadata (ScannerDocumentMetadata.swift) for JSON metadata.
-// - Called from ScannerApp UI (e.g., ReviewView) to persist a scan session as a resumable draft.
+// - Called from ScannerApp UI (e.g., ReviewView) to persist a scan session as a resumable draft and to finalize PDFs.
 //
 // Debug Logging:
 // - Default debug mode is Off (internal debugLog).
-// - App-layer logging is handled via ScannerDebug in ReviewView/LibraryView.
 //
 // Section 1. Imports
 import Foundation
@@ -43,6 +43,10 @@ public enum ScannerDraftPersistence {
         case failedToEncodeJPEG(pageIndex: Int)
         case thumbnailWriteFailed(path: String)
 
+        // Metadata / PDF
+        case metadataReadFailed(path: String)
+        case pdfRenderFailed(path: String)
+
         public var errorDescription: String? {
             switch self {
             case .emptyPages:
@@ -51,6 +55,10 @@ public enum ScannerDraftPersistence {
                 return "Failed to encode page \(pageIndex) as JPEG."
             case .thumbnailWriteFailed(let path):
                 return "Failed to write thumbnail at: \(path)"
+            case .metadataReadFailed(let path):
+                return "Failed to read metadata at: \(path)"
+            case .pdfRenderFailed(let path):
+                return "Failed to render PDF at: \(path)"
             }
         }
     }
@@ -68,9 +76,19 @@ public enum ScannerDraftPersistence {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-
         let data = try encoder.encode(metadata)
         try data.write(to: url, options: [.atomic])
+    }
+
+    private static func readMetadata(from url: URL) throws -> ScannerDocumentMetadata {
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ScannerDocumentMetadata.self, from: data)
+        } catch {
+            throw DraftError.metadataReadFailed(path: url.path)
+        }
     }
 
     // Section 2.5 Thumbnail helpers
@@ -95,49 +113,113 @@ public enum ScannerDraftPersistence {
         }
     }
 
-    // Section 2.6 Public API
-    /// Saves a new draft document by writing metadata.json, thumbnail.jpg, and each page image to disk.
+    // Section 2.6 PDF helpers
+    private static func aspectFitRect(for imageSize: CGSize, in bounds: CGRect) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0 else { return bounds }
+        let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
+        let w = imageSize.width * scale
+        let h = imageSize.height * scale
+        let x = bounds.midX - (w / 2.0)
+        let y = bounds.midY - (h / 2.0)
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    private static func renderPDF(
+        to url: URL,
+        pageImages: [UIImage],
+        pageSize: CGSize = CGSize(width: 612, height: 792) // US Letter in points
+    ) throws {
+        let bounds = CGRect(origin: .zero, size: pageSize)
+        let renderer = UIGraphicsPDFRenderer(bounds: bounds)
+
+        do {
+            try renderer.writePDF(to: url) { context in
+                for image in pageImages {
+                    context.beginPage()
+                    let rect = aspectFitRect(for: image.size, in: bounds)
+                    image.draw(in: rect)
+                }
+            }
+        } catch {
+            throw DraftError.pdfRenderFailed(path: url.path)
+        }
+    }
+
+    private static func atomicReplaceItem(at destinationURL: URL, withItemAt sourceURL: URL, fileManager: FileManager) throws {
+        // Replace destination with source atomically when possible.
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            _ = try fileManager.replaceItemAt(destinationURL, withItemAt: sourceURL)
+        } else {
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        }
+    }
+
+    private static func clearExistingJPGs(in pagesDir: URL, fileManager: FileManager) {
+        if let existing = try? fileManager.contentsOfDirectory(at: pagesDir, includingPropertiesForKeys: nil) {
+            for url in existing where url.pathExtension.lowercased() == "jpg" {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+    }
+
+    // Section 2.7 Public API (Create/Update Draft)
+    /// Creates or updates a draft document by writing:
+    /// - metadata.json
+    /// - thumbnail.jpg
+    /// - pages/###.jpg (overwritten to match provided order)
+    ///
+    /// IMPORTANT:
+    /// - Pass a previously returned documentID to update the same document (prevents duplicates in the Library).
     @discardableResult
     public static func saveDraft(
+        documentID: UUID? = nil,
         pages: [ScannedPage],
         jpegQuality: CGFloat = 0.9,
         fileManager: FileManager = .default
     ) throws -> DraftSaveResult {
 
-        guard !pages.isEmpty else {
-            throw DraftError.emptyPages
-        }
+        guard !pages.isEmpty else { throw DraftError.emptyPages }
 
-        let documentID = UUID()
-        let paths = ScannerDocumentPaths(documentID: documentID)
+        let id = documentID ?? UUID()
+        let paths = ScannerDocumentPaths(documentID: id)
 
-        // Ensure document directories exist.
+        // Ensure directories.
         let docRoot = try paths.documentRootURL(fileManager: fileManager)
         let pagesDir = try paths.pagesDirectoryURL(fileManager: fileManager)
-        _ = try paths.outputDirectoryURL(fileManager: fileManager) // created but unused for drafts
+        _ = try paths.outputDirectoryURL(fileManager: fileManager)
 
-        debugLog("Saving draft \(documentID.uuidString)")
+        debugLog("saveDraft documentID=\(id.uuidString)")
         debugLog("Document root: \(docRoot.path)")
         debugLog("Pages dir: \(pagesDir.path)")
 
-        // Write initial metadata.json for Library listing.
+        // Determine metadata: preserve title/createdAt if updating an existing document.
         let now = Date()
-        let metadata = ScannerDocumentMetadata(
-            documentID: documentID,
-            title: defaultTitle(for: now),
-            createdAt: now,
-            modifiedAt: now,
-            pageCount: pages.count,
-            state: .draft
-        )
-
         let metadataURL = try paths.metadataURL(fileManager: fileManager)
+        var metadata: ScannerDocumentMetadata
+
+        if fileManager.fileExists(atPath: metadataURL.path) {
+            // Update existing metadata in-place.
+            metadata = try readMetadata(from: metadataURL)
+            metadata.modifiedAt = now
+            metadata.pageCount = pages.count
+            // Keep state unless it is missing; if it's draft, keep draft.
+            // (Do NOT revert savedLocal/synced back to draft.)
+        } else {
+            metadata = ScannerDocumentMetadata(
+                documentID: id,
+                title: defaultTitle(for: now),
+                createdAt: now,
+                modifiedAt: now,
+                pageCount: pages.count,
+                state: .draft
+            )
+        }
+
         try writeMetadata(metadata, to: metadataURL)
         debugLog("Wrote metadata -> \(metadataURL.lastPathComponent)")
 
-        // Write thumbnail.jpg (from first page). Use rendered thumbnail with fallback to compressed full image.
+        // Thumbnail from first page.
         let thumbURL = try paths.thumbnailURL(fileManager: fileManager)
-
         if let first = pages.first {
             if let thumbData = makeThumbnailJPEG(from: first.image) {
                 try thumbData.write(to: thumbURL, options: [.atomic])
@@ -148,16 +230,15 @@ public enum ScannerDraftPersistence {
             } else {
                 debugLog("Skipped thumbnail: failed to encode JPEG")
             }
-        } else {
-            debugLog("Skipped thumbnail: no pages")
         }
 
-        // Verify thumbnail exists; if not, surface error so the app can report it.
         if !fileManager.fileExists(atPath: thumbURL.path) {
             throw DraftError.thumbnailWriteFailed(path: thumbURL.path)
         }
 
-        // Write pages as 001.jpg, 002.jpg, ...
+        // Overwrite pages in canonical order.
+        clearExistingJPGs(in: pagesDir, fileManager: fileManager)
+
         for (idx, page) in pages.enumerated() {
             let pageNumber = idx + 1
             let url = try paths.pageImageURL(pageNumber: pageNumber, fileManager: fileManager)
@@ -170,10 +251,122 @@ public enum ScannerDraftPersistence {
             debugLog("Wrote page \(pageNumber) -> \(url.lastPathComponent)")
         }
 
-        return DraftSaveResult(documentID: documentID, documentRootURL: docRoot, pageCount: pages.count)
+        return DraftSaveResult(documentID: id, documentRootURL: docRoot, pageCount: pages.count)
     }
 
-    // Section 2.7 Debug logging helper
+    // Section 2.8 Public API (Finalize)
+    /// Finalizes an existing draft by:
+    /// - Writing pages/###.jpg in the provided order (overwriting any existing pages)
+    /// - Generating output/document.pdf
+    /// - Updating metadata.json (pageCount, modifiedAt, state = savedLocal)
+    public static func finalizeDocument(
+        documentID: UUID,
+        pages: [ScannedPage],
+        jpegQuality: CGFloat = 0.9,
+        fileManager: FileManager = .default
+    ) throws {
+
+        guard !pages.isEmpty else { throw DraftError.emptyPages }
+
+        let paths = ScannerDocumentPaths(documentID: documentID)
+
+        // Ensure directories.
+        let docRoot = try paths.documentRootURL(fileManager: fileManager)
+        let pagesDir = try paths.pagesDirectoryURL(fileManager: fileManager)
+        let outputDir = try paths.outputDirectoryURL(fileManager: fileManager)
+
+        debugLog("finalizeDocument documentID=\(documentID.uuidString)")
+        debugLog("Document root: \(docRoot.path)")
+        debugLog("Pages dir: \(pagesDir.path)")
+        debugLog("Output dir: \(outputDir.path)")
+
+        // (1) Overwrite pages in canonical order.
+        clearExistingJPGs(in: pagesDir, fileManager: fileManager)
+
+        var uiImages: [UIImage] = []
+        uiImages.reserveCapacity(pages.count)
+
+        for (idx, page) in pages.enumerated() {
+            let pageNumber = idx + 1
+            let url = try paths.pageImageURL(pageNumber: pageNumber, fileManager: fileManager)
+
+            guard let data = page.image.jpegData(compressionQuality: jpegQuality) else {
+                throw DraftError.failedToEncodeJPEG(pageIndex: idx)
+            }
+
+            try data.write(to: url, options: [.atomic])
+            debugLog("Wrote page \(pageNumber) -> \(url.lastPathComponent)")
+            uiImages.append(page.image)
+        }
+
+        // (2) Render PDF to temp, then atomically replace output/document.pdf
+        let pdfURL = try paths.pdfURL(fileManager: fileManager)
+        let tmpURL = outputDir.appendingPathComponent("document.tmp.pdf", isDirectory: false)
+
+        if fileManager.fileExists(atPath: tmpURL.path) {
+            try? fileManager.removeItem(at: tmpURL)
+        }
+
+        try renderPDF(to: tmpURL, pageImages: uiImages)
+        try atomicReplaceItem(at: pdfURL, withItemAt: tmpURL, fileManager: fileManager)
+        debugLog("Wrote PDF -> \(pdfURL.lastPathComponent)")
+
+        // (3) Update metadata.json
+        let metadataURL = try paths.metadataURL(fileManager: fileManager)
+        var metadata: ScannerDocumentMetadata
+        if fileManager.fileExists(atPath: metadataURL.path) {
+            metadata = try readMetadata(from: metadataURL)
+        } else {
+            // If finalize is called without a prior draft save, create baseline metadata.
+            let now = Date()
+            metadata = ScannerDocumentMetadata(
+                documentID: documentID,
+                title: defaultTitle(for: now),
+                createdAt: now,
+                modifiedAt: now,
+                pageCount: pages.count,
+                state: .draft
+            )
+        }
+
+        metadata.pageCount = pages.count
+        metadata.modifiedAt = Date()
+        metadata.state = .savedLocal
+
+        try writeMetadata(metadata, to: metadataURL)
+        debugLog("Updated metadata state -> savedLocal")
+    }
+
+    // Section 2.9 Public API (Share)
+    /// Returns the URL for output/document.pdf for the given document.
+    /// - If the PDF already exists, returns it.
+    /// - If missing (likely a draft), generates it from persisted page JPEGs, updates metadata to savedLocal,
+    ///   and returns the new PDF URL.
+    public static func pdfURLForSharing(
+        documentID: UUID,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+
+        let paths = ScannerDocumentPaths(documentID: documentID)
+        let pdfURL = try paths.pdfURL(fileManager: fileManager)
+
+        if fileManager.fileExists(atPath: pdfURL.path) {
+            debugLog("pdfURLForSharing found existing PDF at: \(pdfURL.path)")
+            return pdfURL
+        }
+
+        debugLog("pdfURLForSharing PDF missing; generating for documentID=\(documentID.uuidString)")
+
+        // Load persisted pages and reuse finalizeDocument to create the PDF.
+        // This also updates metadata state to savedLocal.
+        let pages = try ScannerDocumentLoader.loadPages(documentID: documentID, fileManager: fileManager)
+        try finalizeDocument(documentID: documentID, pages: pages, fileManager: fileManager)
+
+        return pdfURL
+    }
+
+
+    // Section 2.10 Debug logging helper
     private static func debugLog(_ message: String) {
         guard isDebugEnabled else { return }
         print("ScannerDraftPersistence: \(message)")

@@ -12,6 +12,7 @@
 //
 // Section 1. Imports
 import SwiftUI
+import UIKit
 import ScannerKit
 
 // Section 2. View
@@ -21,10 +22,18 @@ struct ReviewView: View {
     @State private var pages: [ScannerKit.ScannedPage]
     @State private var selectedPage: ScannerKit.ScannedPage? = nil
 
+    // Section 2.1.0 Document identity
+    @State private var currentDocumentID: UUID? = nil
+
     // Section 2.1.1 Save Draft UI state
     @State private var isShowingSaveDraftAlert: Bool = false
     @State private var saveDraftAlertTitle: String = ""
     @State private var saveDraftAlertMessage: String = ""
+
+
+    // Section 2.1.2 Export/Share UI state
+    @State private var isShowingShareSheet: Bool = false
+    @State private var shareURL: URL? = nil
 
     // Section 2.2 Environment
     @Environment(\.editMode) private var editMode
@@ -113,6 +122,16 @@ struct ReviewView: View {
                 selectedPage = nil
             }
         }
+
+        .sheet(isPresented: $isShowingShareSheet) {
+            if let url = shareURL {
+                ActivityView(activityItems: [url])
+                    .presentationDetents([.medium, .large])
+            } else {
+                Text("Nothing to share.")
+                    .padding()
+            }
+        }
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -137,7 +156,18 @@ struct ReviewView: View {
             .disabled(pages.isEmpty)
         }
 
-        // Section 3.2 Edit (reorder/delete)
+        // Section 3.2 Export PDF + Share
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                exportPDFAndShare()
+            } label: {
+                Label("Share PDF", systemImage: "square.and.arrow.up")
+            }
+            .tint(Theme.Colors.textPrimary)
+            .disabled(pages.isEmpty)
+        }
+
+        // Section 3.3 Edit (reorder/delete)
         ToolbarItem(placement: .navigationBarTrailing) {
             EditButton()
                 .tint(Theme.Colors.textPrimary)
@@ -147,7 +177,8 @@ struct ReviewView: View {
     // Section 4. Actions (UI invokes ScannerKit transforms)
     private func saveDraft() {
         do {
-            let result = try ScannerDraftPersistence.saveDraft(pages: pages)
+            let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
+            currentDocumentID = result.documentID
 
             if ScannerDebug.isEnabled {
                 ScannerDebug.writeLog("Saved draft documentID=\(result.documentID.uuidString) pages=\(result.pageCount) root=\(result.documentRootURL.path)")
@@ -163,6 +194,37 @@ struct ReviewView: View {
             }
 
             saveDraftAlertTitle = "Save Failed"
+            saveDraftAlertMessage = error.localizedDescription
+            isShowingSaveDraftAlert = true
+        }
+    }
+
+
+    private func exportPDFAndShare() {
+        do {
+            // Ensure we have a persisted document ID to finalize.
+            let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
+            currentDocumentID = result.documentID
+
+            // Generate output/document.pdf and update metadata to savedLocal.
+            try ScannerDraftPersistence.finalizeDocument(documentID: result.documentID, pages: pages)
+
+            // Resolve the PDF URL for sharing.
+            let paths = ScannerDocumentPaths(documentID: result.documentID)
+            let pdfURL = try paths.pdfURL()
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("Exported PDF for documentID=\(result.documentID.uuidString) url=\(pdfURL.path)")
+            }
+
+            shareURL = pdfURL
+            isShowingShareSheet = true
+        } catch {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("Export/share failed: \(error.localizedDescription)")
+            }
+
+            saveDraftAlertTitle = "Export Failed"
             saveDraftAlertMessage = error.localizedDescription
             isShowingSaveDraftAlert = true
         }
@@ -303,6 +365,19 @@ private struct LocalPageViewerPlaceholder: View {
             if ScannerDebug.isEnabled { ScannerDebug.writeLog("Opened placeholder viewer for page id=\(page.id)") }
         }
     }
+}
+
+
+// Section 6.1 Share sheet wrapper (UIKit)
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    var applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }
 
 // Section 7. Preview

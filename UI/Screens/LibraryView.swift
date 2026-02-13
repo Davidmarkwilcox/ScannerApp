@@ -1,10 +1,18 @@
 // LibraryView.swift
 // File: LibraryView.swift
-// Description: Placeholder Library screen. Eventually lists documents with thumbnails, unsaved indicators,
-// and actions (open/view/share/save/delete). Styled with Theme defaults.
+// Description:
+// Library screen for ScannerApp.
+// - Lists locally persisted scanner documents (draft + savedLocal states).
+// - Provides row actions: open/view, rename, delete, and Share PDF.
+// - Share PDF will generate output/document.pdf on-demand (via ScannerKit) if missing.
+// Interactions:
+// - Uses ScannerKit.ScannerDocumentStore for listing/rename/delete.
+// - Uses ScannerKit.ScannerDraftPersistence.pdfURLForSharing(documentID:) to obtain/generate a PDF URL.
+// - Uses ScannerKit.ScannerDocumentLoader to load pages when opening ViewerView.
 //
 // Section 1. Imports
 import SwiftUI
+import UIKit
 import ScannerKit
 
 // Section 2. View
@@ -13,20 +21,26 @@ struct LibraryView: View {
     // Section 2.1 State
     @State private var documents: [ScannerDocumentMetadata] = []
 
-    // Rename UI
+    // Section 2.2 Rename UI
     @State private var isShowingRenameSheet: Bool = false
     @State private var renameText: String = ""
     @State private var renameTarget: ScannerDocumentMetadata? = nil
 
-    // Delete UI
+    // Section 2.3 Delete UI
     @State private var isShowingDeleteConfirm: Bool = false
     @State private var deleteTarget: ScannerDocumentMetadata? = nil
 
-    // Section 2.2 Body
+    // Section 2.4 Share UI
+    @State private var isShowingShareSheet: Bool = false
+    @State private var shareURL: URL? = nil
+    @State private var shareErrorMessage: String = ""
+    @State private var isShowingShareError: Bool = false
+
+    // Section 2.5 Body
     var body: some View {
         NavigationStack {
             List {
-                // Section 2.2.1 Empty state
+                // Section 2.5.1 Empty state
                 if documents.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("No documents yet")
@@ -39,7 +53,7 @@ struct LibraryView: View {
                     }
                     .padding(.vertical, 12)
                 } else {
-                    // Section 2.2.2 Documents
+                    // Section 2.5.2 Documents
                     ForEach(documents) { doc in
                         NavigationLink {
                             DocumentViewerRouteView(metadata: doc)
@@ -62,23 +76,36 @@ struct LibraryView: View {
                             }
                             .padding(.vertical, 4)
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            // Section 2.2.2.1 Delete
-                            Button(role: .destructive) {
-                                requestDelete(doc)
+                        // Section 2.5.2.1 Swipe actions
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                requestSharePDF(doc)
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label("Share PDF", systemImage: "square.and.arrow.up")
                             }
+                            .tint(Theme.Colors.accent)
 
-                            // Section 2.2.2.2 Rename
                             Button {
                                 requestRename(doc)
                             } label: {
                                 Label("Rename", systemImage: "pencil")
                             }
-                            .tint(Theme.Colors.accent)
+                            .tint(Theme.Colors.metallicGrey2)
+
+                            Button(role: .destructive) {
+                                requestDelete(doc)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
+                        // Section 2.5.2.2 Context menu (hard press)
                         .contextMenu {
+                            Button {
+                                requestSharePDF(doc)
+                            } label: {
+                                Label("Share PDF", systemImage: "square.and.arrow.up")
+                            }
+
                             Button {
                                 requestRename(doc)
                             } label: {
@@ -97,7 +124,7 @@ struct LibraryView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("Library")
             .toolbar {
-                // Section 2.3 Toolbar
+                // Section 2.6 Toolbar
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         reloadDocuments()
@@ -110,7 +137,7 @@ struct LibraryView: View {
             .onAppear {
                 reloadDocuments()
             }
-            // Section 2.4 Delete confirmation
+            // Section 2.7 Delete confirmation
             .confirmationDialog(
                 "Delete Document?",
                 isPresented: $isShowingDeleteConfirm,
@@ -125,7 +152,7 @@ struct LibraryView: View {
                     Text("This will permanently delete “\(doc.title)” from this device.")
                 }
             }
-            // Section 2.5 Rename sheet
+            // Section 2.8 Rename sheet
             .sheet(isPresented: $isShowingRenameSheet) {
                 RenameDocumentSheet(
                     initialTitle: renameText,
@@ -139,10 +166,27 @@ struct LibraryView: View {
                     }
                 )
             }
+            // Section 2.9 Share sheet
+            .sheet(isPresented: $isShowingShareSheet) {
+                if let url = shareURL {
+                    ShareSheet(activityItems: [url])
+                } else {
+                    Text("Nothing to share")
+                        .onAppear { isShowingShareSheet = false }
+                }
+            }
+            // Section 2.10 Share error
+            .alert("Unable to Share", isPresented: $isShowingShareError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(shareErrorMessage)
+            }
         }
     }
 
     // Section 3. Actions
+
+    // Section 3.1 Reload
     private func reloadDocuments() {
         documents = ScannerDocumentStore.listDocuments()
         if ScannerDebug.isEnabled {
@@ -150,6 +194,25 @@ struct LibraryView: View {
         }
     }
 
+    // Section 3.2 Share
+    private func requestSharePDF(_ doc: ScannerDocumentMetadata) {
+        do {
+            let url = try ScannerDraftPersistence.pdfURLForSharing(documentID: doc.documentID)
+            shareURL = url
+            isShowingShareSheet = true
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("LibraryView Share PDF documentID=\(doc.documentID.uuidString) url=\(url.path)")
+            }
+        } catch {
+            shareErrorMessage = error.localizedDescription
+            isShowingShareError = true
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("LibraryView Share PDF failed documentID=\(doc.documentID.uuidString): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // Section 3.3 Rename
     private func requestRename(_ doc: ScannerDocumentMetadata) {
         renameTarget = doc
         renameText = doc.title
@@ -160,26 +223,25 @@ struct LibraryView: View {
         guard let target = renameTarget else { return }
         do {
             let updated = try ScannerDocumentStore.renameDocument(documentID: target.documentID, newTitle: renameText)
-            // Update in-place to avoid full reload (still fine to reload if preferred)
             if let idx = documents.firstIndex(where: { $0.documentID == updated.documentID }) {
                 documents[idx] = updated
             } else {
                 reloadDocuments()
             }
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Renamed documentID=\(updated.documentID.uuidString) title=\(updated.title)")
+                ScannerDebug.writeLog("LibraryView Renamed documentID=\(updated.documentID.uuidString) title=\(updated.title)")
             }
         } catch {
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Rename failed documentID=\(target.documentID.uuidString): \(error.localizedDescription)")
+                ScannerDebug.writeLog("LibraryView Rename failed documentID=\(target.documentID.uuidString): \(error.localizedDescription)")
             }
-            // Fallback: reload to keep UI consistent
             reloadDocuments()
         }
         isShowingRenameSheet = false
         renameTarget = nil
     }
 
+    // Section 3.4 Delete
     private func requestDelete(_ doc: ScannerDocumentMetadata) {
         deleteTarget = doc
         isShowingDeleteConfirm = true
@@ -191,11 +253,11 @@ struct LibraryView: View {
             try ScannerDocumentStore.deleteDocument(documentID: target.documentID)
             documents.removeAll { $0.documentID == target.documentID }
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Deleted documentID=\(target.documentID.uuidString)")
+                ScannerDebug.writeLog("LibraryView Deleted documentID=\(target.documentID.uuidString)")
             }
         } catch {
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Delete failed documentID=\(target.documentID.uuidString): \(error.localizedDescription)")
+                ScannerDebug.writeLog("LibraryView Delete failed documentID=\(target.documentID.uuidString): \(error.localizedDescription)")
             }
             reloadDocuments()
         }
@@ -204,19 +266,34 @@ struct LibraryView: View {
     }
 }
 
-// Section 3.6 Rename Sheet
+// Section 4. Share Sheet (UIKit bridge)
+private struct ShareSheet: UIViewControllerRepresentable {
+
+    // Section 4.1 Inputs
+    let activityItems: [Any]
+    var applicationActivities: [UIActivity]? = nil
+
+    // Section 4.2 Make
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    // Section 4.3 Update
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+}
+
+// Section 5. Rename Sheet
 private struct RenameDocumentSheet: View {
 
-    // Section 3.6.1 Inputs
+    // Section 5.1 Inputs
     let initialTitle: String
     let onSave: (String) -> Void
     let onCancel: () -> Void
 
-    // Section 3.6.2 State
+    // Section 5.2 State
     @State private var text: String
-    @FocusState private var isFocused: Bool
 
-    // Section 3.6.3 Init
+    // Section 5.3 Init
     init(initialTitle: String, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.initialTitle = initialTitle
         self.onSave = onSave
@@ -224,105 +301,46 @@ private struct RenameDocumentSheet: View {
         _text = State(initialValue: initialTitle)
     }
 
-    // Section 3.6.4 Body
+    // Section 5.4 Body
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Title") {
-                    SelectAllTextField(text: $text)
-                        .focused($isFocused)
-                }
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Rename")
+                    .font(Theme.Typography.headline)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+
+                TextField("Title", text: $text)
+                    .textFieldStyle(.roundedBorder)
+
+                Spacer()
             }
+            .padding()
             .navigationTitle("Rename")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel() }
-                        .tint(Theme.Colors.textPrimary)
+                    Button("Cancel") {
+                        onCancel()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { onSave(text) }
-                        .tint(Theme.Colors.accent)
+                    Button("Save") {
+                        onSave(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .onAppear {
-                // Focus and select all text on present
-                isFocused = true
-            }
-        }
-        .scannerScreen()
-    }
-}
-
-// Section 3.7 Select-all TextField (UIKit-backed for reliable selection)
-private struct SelectAllTextField: UIViewRepresentable {
-
-    // Section 3.7.1 Binding
-    @Binding var text: String
-
-    // Section 3.7.2 Make
-    func makeUIView(context: Context) -> UITextField {
-        let tf = UITextField(frame: .zero)
-        tf.borderStyle = .none
-        tf.clearButtonMode = .whileEditing
-        tf.returnKeyType = .done
-        tf.autocapitalizationType = .sentences
-        tf.autocorrectionType = .default
-        tf.delegate = context.coordinator
-        tf.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
-        return tf
-    }
-
-    // Section 3.7.3 Update
-    func updateUIView(_ uiView: UITextField, context: Context) {
-        if uiView.text != text {
-            uiView.text = text
-        }
-
-        // Select all once when the view first appears.
-        if !context.coordinator.didSelectAllOnce {
-            context.coordinator.didSelectAllOnce = true
-            DispatchQueue.main.async {
-                uiView.becomeFirstResponder()
-                uiView.selectAll(nil)
-            }
-        }
-    }
-
-    // Section 3.7.4 Coordinator
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
-    }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-
-        // Section 3.7.4.1 State
-        @Binding var text: String
-        var didSelectAllOnce: Bool = false
-
-        init(text: Binding<String>) {
-            _text = text
-        }
-
-        @objc func textChanged(_ sender: UITextField) {
-            text = sender.text ?? ""
-        }
-
-        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            textField.resignFirstResponder()
-            return true
         }
     }
 }
 
-
-// Section 4. Thumbnail
+// Section 6. Thumbnail
 private struct LibraryThumbnailView: View {
 
-    // Section 4.1 Input
+    // Section 6.1 Input
     let documentID: UUID
 
-    // Section 5.2 Body
+    // Section 6.2 Body
     var body: some View {
         let image = loadThumbnail()
         return Group {
@@ -348,7 +366,7 @@ private struct LibraryThumbnailView: View {
         )
     }
 
-    // Section 4.3 Loading
+    // Section 6.3 Loading
     private func loadThumbnail() -> UIImage? {
         do {
             let paths = ScannerDocumentPaths(documentID: documentID)
@@ -360,18 +378,18 @@ private struct LibraryThumbnailView: View {
     }
 }
 
-// Section 5. Viewer Route
+// Section 7. Viewer Route
 private struct DocumentViewerRouteView: View {
 
-    // Section 5.1 Input
+    // Section 7.1 Input
     let metadata: ScannerDocumentMetadata
 
-    // Section 5.2 State
+    // Section 7.2 State
     @State private var pages: [ScannerKit.ScannedPage] = []
     @State private var errorMessage: String? = nil
     @State private var isLoading: Bool = true
 
-    // Section 5.3 Body
+    // Section 7.3 Body
     var body: some View {
         Group {
             if isLoading {
@@ -408,7 +426,7 @@ private struct DocumentViewerRouteView: View {
         }
     }
 
-    // Section 5.4 Loading
+    // Section 7.4 Loading
     private func load() {
         guard isLoading else { return }
         do {
@@ -418,37 +436,6 @@ private struct DocumentViewerRouteView: View {
             errorMessage = error.localizedDescription
             isLoading = false
         }
-    }
-}
-
-// Section 5. Detail Stub
-private struct LibraryDocumentDetailStubView: View {
-
-    // Section 5.1 Inputs
-    let metadata: ScannerDocumentMetadata
-
-    // Section 5.2 Body
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(metadata.title)
-                .font(.title2)
-                .foregroundStyle(Theme.Colors.textPrimary)
-
-            Text("Document ID: \(metadata.documentID.uuidString)")
-                .font(.footnote)
-                .foregroundStyle(Theme.Colors.textSecondary)
-
-            Text("State: \(metadata.state.rawValue)")
-                .foregroundStyle(Theme.Colors.textSecondary)
-
-            Text("Pages: \(metadata.pageCount)")
-                .foregroundStyle(Theme.Colors.textSecondary)
-
-            Spacer()
-        }
-        .padding()
-        .navigationTitle("Document")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
