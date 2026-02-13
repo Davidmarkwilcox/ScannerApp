@@ -18,14 +18,19 @@ import ScannerKit
 struct ReviewView: View {
 
     // Section 2.1 State (UI-owned)
-    @State private var pages: [ScannedPage]
-    @State private var selectedPage: ScannedPage? = nil
+    @State private var pages: [ScannerKit.ScannedPage]
+    @State private var selectedPage: ScannerKit.ScannedPage? = nil
+
+    // Section 2.1.1 Save Draft UI state
+    @State private var isShowingSaveDraftAlert: Bool = false
+    @State private var saveDraftAlertTitle: String = ""
+    @State private var saveDraftAlertMessage: String = ""
 
     // Section 2.2 Environment
     @Environment(\.editMode) private var editMode
 
     // Section 2.3 Init
-    init(pages: [ScannedPage]) {
+    init(pages: [ScannerKit.ScannedPage]) {
         _pages = State(initialValue: pages)
     }
 
@@ -108,6 +113,11 @@ struct ReviewView: View {
                 selectedPage = nil
             }
         }
+        .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(saveDraftAlertMessage)
+        }
         .onAppear {
             if ScannerDebug.isEnabled { ScannerDebug.writeLog("ReviewView appeared with \(pages.count) pages") }
         }
@@ -116,6 +126,18 @@ struct ReviewView: View {
     // Section 3. Toolbar
     @ToolbarContentBuilder
     private var reviewToolbar: some ToolbarContent {
+        // Section 3.1 Save Draft
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                saveDraft()
+            } label: {
+                Label("Save Draft", systemImage: "tray.and.arrow.down")
+            }
+            .tint(Theme.Colors.textPrimary)
+            .disabled(pages.isEmpty)
+        }
+
+        // Section 3.2 Edit (reorder/delete)
         ToolbarItem(placement: .navigationBarTrailing) {
             EditButton()
                 .tint(Theme.Colors.textPrimary)
@@ -123,6 +145,29 @@ struct ReviewView: View {
     }
 
     // Section 4. Actions (UI invokes ScannerKit transforms)
+    private func saveDraft() {
+        do {
+            let result = try ScannerDraftPersistence.saveDraft(pages: pages)
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("Saved draft documentID=\(result.documentID.uuidString) pages=\(result.pageCount) root=\(result.documentRootURL.path)")
+            }
+
+            saveDraftAlertTitle = "Draft Saved"
+            saveDraftAlertMessage = "Saved \(result.pageCount) page(s).\n\nDocument ID:\n\(result.documentID.uuidString)"
+
+            isShowingSaveDraftAlert = true
+        } catch {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("Save draft failed: \(error.localizedDescription)")
+            }
+
+            saveDraftAlertTitle = "Save Failed"
+            saveDraftAlertMessage = error.localizedDescription
+            isShowingSaveDraftAlert = true
+        }
+    }
+
     private func rotate(pageID: UUID, clockwise: Bool) {
         guard let idx = pages.firstIndex(where: { $0.id == pageID }) else { return }
         pages[idx] = pages[idx].rotated90(clockwise: clockwise)
@@ -134,7 +179,7 @@ struct ReviewView: View {
 
     private func deletePages(at offsets: IndexSet) {
         pages.remove(atOffsets: offsets)
-        pages = ScannedPage.reindexed(pages)
+        pages = ScannerKit.ScannedPage.reindexed(pages)
 
         if ScannerDebug.isEnabled {
             ScannerDebug.writeLog("Deleted pages at offsets=\(Array(offsets)) -> remaining=\(pages.count)")
@@ -143,7 +188,7 @@ struct ReviewView: View {
 
     private func movePages(from source: IndexSet, to destination: Int) {
         pages.move(fromOffsets: source, toOffset: destination)
-        pages = ScannedPage.reindexed(pages)
+        pages = ScannerKit.ScannedPage.reindexed(pages)
 
         if ScannerDebug.isEnabled {
             ScannerDebug.writeLog("Moved pages from=\(Array(source)) to=\(destination)")
@@ -155,7 +200,7 @@ struct ReviewView: View {
 private struct ReviewPageRow: View {
 
     // Section 5.1 Inputs
-    let page: ScannedPage
+    let page: ScannerKit.ScannedPage
     let isEditing: Bool
     let onRotateClockwise: () -> Void
     let onRotateCounterClockwise: () -> Void
@@ -228,7 +273,7 @@ private struct ReviewPageRow: View {
 
 // Section 6. ScannerApp-local placeholder viewer (temporary)
 private struct LocalPageViewerPlaceholder: View {
-    let page: ScannedPage
+    let page: ScannerKit.ScannedPage
     let onClose: () -> Void
 
     var body: some View {

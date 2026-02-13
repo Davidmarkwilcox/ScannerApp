@@ -2,7 +2,7 @@
 // File: ScanView.swift
 // Description:
 // Scan screen for ScannerApp. Presents ScannerKit's DocumentCamera (VisionKit document capture),
-// receives captured pages as [ScannedPage], and hands off captured pages to ReviewView.
+// receives captured pages as [ScannerKit.ScannedPage], and hands off captured pages to ReviewView.
 // UI styling uses Theme; scanning logic remains in ScannerKit for lift-and-shift safety.
 //
 // Section 1. Imports
@@ -14,7 +14,7 @@ struct ScanView: View {
 
     // Section 2.1 State
     @State private var isPresentingCamera: Bool = false
-    @State private var scannedPages: [ScannedPage] = []
+    @State private var scannedPages: [ScannerKit.ScannedPage] = []
     @State private var lastErrorMessage: String? = nil
     @State private var navigateToReview: Bool = false
 
@@ -100,9 +100,12 @@ struct ScanView: View {
             DocumentCamera { result in
                 switch result {
                 case .success(let pages):
-                    scannedPages = pages
+                    // Normalize to ScannerKit.ScannedPage to avoid module-type collisions
+                    scannedPages = pages.map { page in
+                        ScannerKit.ScannedPage(id: page.id, pageIndex: page.pageIndex, image: page.image, createdAt: page.createdAt)
+                    }
                     lastErrorMessage = nil
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: captured \(pages.count) pages") }
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: captured \(scannedPages.count) pages") }
 
                 case .cancelled:
                     if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: camera cancelled") }

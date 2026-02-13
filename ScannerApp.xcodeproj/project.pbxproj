@@ -35,6 +35,12 @@
 		8A126C142F37CC1600DCE03F /* ScannerApp.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = ScannerApp.xcdatamodel; sourceTree = "<group>"; };
 		8A126C162F37CC1600DCE03F /* ScannerApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScannerApp.entitlements; sourceTree = "<group>"; };
 		8A126C172F37CC1600DCE03F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8A784DC92F3E9EF600D6282C /* ScannerPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerPaths.swift; sourceTree = "<group>"; };
+		8A784DCA2F3E9F9800D6282C /* ScannerDocumentPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerDocumentPaths.swift; sourceTree = "<group>"; };
+		8A784DCB2F3EA1FB00D6282C /* ScannerDraftPersistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerDraftPersistence.swift; sourceTree = "<group>"; };
+		8A784DCC2F3EABDE00D6282C /* ScannerDocumentMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerDocumentMetadata.swift; sourceTree = "<group>"; };
+		8A784DCD2F3EAD2500D6282C /* ScannerDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerDocumentStore.swift; sourceTree = "<group>"; };
+		8A784DCE2F3EBD3000D6282C /* ScannerDocumentLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerDocumentLoader.swift; sourceTree = "<group>"; };
 		8A96EC292F37E1A800FFE256 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		8A96EC2B2F37E1B700FFE256 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
 		8A96EC2D2F37E1CA00FFE256 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
@@ -204,6 +210,12 @@
 			isa = PBXGroup;
 			children = (
 				8A96EC382F38053300FFE256 /* ScannerKit.swift */,
+				8A784DC92F3E9EF600D6282C /* ScannerPaths.swift */,
+				8A784DCA2F3E9F9800D6282C /* ScannerDocumentPaths.swift */,
+				8A784DCB2F3EA1FB00D6282C /* ScannerDraftPersistence.swift */,
+				8A784DCC2F3EABDE00D6282C /* ScannerDocumentMetadata.swift */,
+				8A784DCD2F3EAD2500D6282C /* ScannerDocumentStore.swift */,
+				8A784DCE2F3EBD3000D6282C /* ScannerDocumentLoader.swift */,
 			);
 			path = ScannerKit;
 			sourceTree = "<group>";
