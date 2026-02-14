@@ -32,8 +32,8 @@ struct ReviewView: View {
 
 
     // Section 2.1.2 Export/Share UI state
-    @State private var isShowingShareSheet: Bool = false
-    @State private var shareURL: URL? = nil
+    // NOTE: We present the share sheet via UIKit directly to avoid SwiftUI sheet timing/state edge-cases.
+    // (Keeping this section placeholder for future UI-driven share flows.)
 
     // Section 2.2 Environment
     @Environment(\.editMode) private var editMode
@@ -123,15 +123,6 @@ struct ReviewView: View {
             }
         }
 
-        .sheet(isPresented: $isShowingShareSheet) {
-            if let url = shareURL {
-                ActivityView(activityItems: [url])
-                    .presentationDetents([.medium, .large])
-            } else {
-                Text("Nothing to share.")
-                    .padding()
-            }
-        }
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -202,26 +193,53 @@ struct ReviewView: View {
 
     private func exportPDFAndShare() {
         do {
-            // Ensure we have a persisted document ID to finalize.
+            let fileManager = FileManager.default
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] Share tapped. documentID=\(currentDocumentID?.uuidString ?? "nil") pages=\(pages.count)")
+            }
+
+            // Ensure we have a persisted document ID (draft) so ScannerKit can generate a shareable PDF.
             let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
             currentDocumentID = result.documentID
 
-            // Generate output/document.pdf and update metadata to savedLocal.
-            try ScannerDraftPersistence.finalizeDocument(documentID: result.documentID, pages: pages)
-
-            // Resolve the PDF URL for sharing.
-            let paths = ScannerDocumentPaths(documentID: result.documentID)
-            let pdfURL = try paths.pdfURL()
-
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Exported PDF for documentID=\(result.documentID.uuidString) url=\(pdfURL.path)")
+                ScannerDebug.writeLog("[ReviewView] saveDraft ok. documentID=\(result.documentID.uuidString) pages=\(result.pageCount)")
             }
 
-            shareURL = pdfURL
-            isShowingShareSheet = true
+            // IMPORTANT:
+            // Share must work on the first save cycle. Use ScannerKit's "pdfURLForSharing" helper which:
+            // - returns output/document.pdf if it already exists, OR
+            // - generates it from persisted page JPEGs and updates metadata to savedLocal.
+            let pdfURL = try ScannerDraftPersistence.pdfURLForSharing(
+                documentID: result.documentID,
+                fileManager: fileManager
+            )
+
+            // Diagnostics: validate existence + size to avoid silent share-sheet no-ops.
+            let exists = fileManager.fileExists(atPath: pdfURL.path)
+            let fileSize: Int64 = (try? fileManager.attributesOfItem(atPath: pdfURL.path)[.size] as? Int64) ?? -1
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] PDF ready. exists=\(exists) size=\(fileSize) url=\(pdfURL.lastPathComponent)")
+            }
+
+            guard exists, fileSize > 0 else {
+                throw NSError(
+                    domain: "ReviewView",
+                    code: 1001,
+                    userInfo: [NSLocalizedDescriptionKey: "Export failed: PDF missing or empty at expected path: \(pdfURL.lastPathComponent) (exists=\(exists) size=\(fileSize))"]
+                )
+            }
+
+            // Present share sheet on the next run-loop tick to avoid UIKit presentation timing edge-cases.
+            DispatchQueue.main.async {
+                self.presentShareSheet(url: pdfURL, documentID: result.documentID)
+            }
+
         } catch {
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("Export/share failed: \(error.localizedDescription)")
+                ScannerDebug.writeLog("[ReviewView] Export/share failed: \(error.localizedDescription)")
             }
 
             saveDraftAlertTitle = "Export Failed"
@@ -229,6 +247,7 @@ struct ReviewView: View {
             isShowingSaveDraftAlert = true
         }
     }
+
 
     private func rotate(pageID: UUID, clockwise: Bool) {
         guard let idx = pages.firstIndex(where: { $0.id == pageID }) else { return }
@@ -255,6 +274,30 @@ struct ReviewView: View {
         if ScannerDebug.isEnabled {
             ScannerDebug.writeLog("Moved pages from=\(Array(source)) to=\(destination)")
         }
+    }
+
+
+    // Section 4.2 Share Presentation (UIKit)
+    private func presentShareSheet(url: URL, documentID: UUID) {
+        // Find the top-most view controller in the active foreground scene.
+        guard let topVC = ReviewViewTopMostViewControllerResolver.topMostViewController() else {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] ERROR: Unable to resolve top-most UIViewController for share presentation")
+            }
+            saveDraftAlertTitle = "Export Failed"
+            saveDraftAlertMessage = "Unable to present share sheet (no active view controller)."
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        if ScannerDebug.isEnabled {
+            let presented = topVC.presentedViewController.map { String(describing: type(of: $0)) } ?? "nil"
+            ScannerDebug.writeLog("[ReviewView] Presenting share sheet. documentID=\(documentID.uuidString) presenter=\(String(describing: type(of: topVC))) alreadyPresented=\(presented)")
+        }
+
+        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        // iPhone: no popover config required.
+        topVC.present(activityVC, animated: true)
     }
 }
 
@@ -368,16 +411,38 @@ private struct LocalPageViewerPlaceholder: View {
 }
 
 
-// Section 6.1 Share sheet wrapper (UIKit)
-private struct ActivityView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-    var applicationActivities: [UIActivity]? = nil
+// Section 6.1 Top-most view controller resolver (UIKit)
+private enum ReviewViewTopMostViewControllerResolver {
 
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    static func topMostViewController() -> UIViewController? {
+        // Active foreground window scene.
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+
+        guard let root = windowScene?.keyWindow?.rootViewController else { return nil }
+        return topMost(from: root)
     }
 
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+    private static func topMost(from vc: UIViewController) -> UIViewController {
+        if let presented = vc.presentedViewController {
+            return topMost(from: presented)
+        }
+        if let nav = vc as? UINavigationController, let visible = nav.visibleViewController {
+            return topMost(from: visible)
+        }
+        if let tab = vc as? UITabBarController, let selected = tab.selectedViewController {
+            return topMost(from: selected)
+        }
+        return vc
+    }
+}
+
+private extension UIWindowScene {
+    var keyWindow: UIWindow? {
+        windows.first(where: { $0.isKeyWindow })
+    }
 }
 
 // Section 7. Preview

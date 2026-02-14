@@ -13,6 +13,8 @@ import ScannerKit
 struct ScanView: View {
 
     // Section 2.1 State
+    @AppStorage("scanner.scanPreset") private var scanPresetRaw: String = "Balanced"
+
     @State private var isPresentingCamera: Bool = false
     @State private var scannedPages: [ScannerKit.ScannedPage] = []
     @State private var lastErrorMessage: String? = nil
@@ -44,7 +46,7 @@ struct ScanView: View {
                 Button {
                     lastErrorMessage = nil
                     isPresentingCamera = true
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: present DocumentCamera") }
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: present DocumentCamera (preset=\(scanPresetRaw))") }
                 } label: {
                     Label("Scan Document", systemImage: "camera.viewfinder")
                 }
@@ -97,7 +99,7 @@ struct ScanView: View {
             if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView appeared") }
         }
         .sheet(isPresented: $isPresentingCamera) {
-            DocumentCamera { result in
+            DocumentCamera(presetRawValue: scanPresetRaw) { result in
                 switch result {
                 case .success(let pages):
                     // Normalize to ScannerKit.ScannedPage to avoid module-type collisions

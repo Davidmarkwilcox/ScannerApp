@@ -46,6 +46,7 @@ public enum ScannerDraftPersistence {
         // Metadata / PDF
         case metadataReadFailed(path: String)
         case pdfRenderFailed(path: String)
+        case failedToLoadPersistedPage(filename: String)
 
         public var errorDescription: String? {
             switch self {
@@ -59,6 +60,8 @@ public enum ScannerDraftPersistence {
                 return "Failed to read metadata at: \(path)"
             case .pdfRenderFailed(let path):
                 return "Failed to render PDF at: \(path)"
+            case .failedToLoadPersistedPage(let filename):
+                return "Failed to load persisted page image: \(filename)"
             }
         }
     }
@@ -350,20 +353,82 @@ public enum ScannerDraftPersistence {
         let paths = ScannerDocumentPaths(documentID: documentID)
         let pdfURL = try paths.pdfURL(fileManager: fileManager)
 
+        // Fast-path: share existing finalized PDF.
         if fileManager.fileExists(atPath: pdfURL.path) {
             debugLog("pdfURLForSharing found existing PDF at: \(pdfURL.path)")
             return pdfURL
         }
 
-        debugLog("pdfURLForSharing PDF missing; generating for documentID=\(documentID.uuidString)")
+        debugLog("pdfURLForSharing PDF missing; generating from persisted page JPEGs for documentID=\(documentID.uuidString)")
 
-        // Load persisted pages and reuse finalizeDocument to create the PDF.
-        // This also updates metadata state to savedLocal.
-        let pages = try ScannerDocumentLoader.loadPages(documentID: documentID, fileManager: fileManager)
-        try finalizeDocument(documentID: documentID, pages: pages, fileManager: fileManager)
+        // IMPORTANT:
+        // Do NOT rely on metadata.pageCount here — on first save, metadata may exist before all files/state are fully settled.
+        // Instead, derive pages from the on-disk /pages directory.
+        let pagesDir = try paths.pagesDirectoryURL(fileManager: fileManager)
+
+        let jpgURLs: [URL] = try fileManager.contentsOfDirectory(
+            at: pagesDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        .filter { url in
+            let ext = url.pathExtension.lowercased()
+            return ext == "jpg" || ext == "jpeg"
+        }
+        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        guard !jpgURLs.isEmpty else {
+            debugLog("pdfURLForSharing found no page JPEGs in: \(pagesDir.path)")
+            throw DraftError.emptyPages
+        }
+
+        var uiImages: [UIImage] = []
+        uiImages.reserveCapacity(jpgURLs.count)
+
+        for url in jpgURLs {
+            guard let image = UIImage(contentsOfFile: url.path) else {
+                throw DraftError.failedToLoadPersistedPage(filename: url.lastPathComponent)
+            }
+            uiImages.append(image)
+        }
+
+        // Render PDF to temp, then atomically replace output/document.pdf
+        let outputDir = try paths.outputDirectoryURL(fileManager: fileManager)
+        let tmpURL = outputDir.appendingPathComponent("document.tmp.pdf", isDirectory: false)
+
+        if fileManager.fileExists(atPath: tmpURL.path) {
+            try? fileManager.removeItem(at: tmpURL)
+        }
+
+        try renderPDF(to: tmpURL, pageImages: uiImages)
+        try atomicReplaceItem(at: pdfURL, withItemAt: tmpURL, fileManager: fileManager)
+        debugLog("pdfURLForSharing wrote PDF -> \(pdfURL.lastPathComponent)")
+
+        // Update metadata.json to reflect savedLocal.
+        let metadataURL = try paths.metadataURL(fileManager: fileManager)
+        var metadata: ScannerDocumentMetadata
+        if fileManager.fileExists(atPath: metadataURL.path) {
+            metadata = try readMetadata(from: metadataURL)
+        } else {
+            let now = Date()
+            metadata = ScannerDocumentMetadata(
+                documentID: documentID,
+                title: defaultTitle(for: now),
+                createdAt: now,
+                modifiedAt: now,
+                pageCount: uiImages.count,
+                state: .draft
+            )
+        }
+
+        metadata.pageCount = uiImages.count
+        metadata.modifiedAt = Date()
+        metadata.state = .savedLocal
+        try writeMetadata(metadata, to: metadataURL)
 
         return pdfURL
     }
+
 
 
     // Section 2.10 Debug logging helper

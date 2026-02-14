@@ -22,6 +22,34 @@ public enum DocumentCameraError: Error, LocalizedError {
     }
 }
 
+
+// Section 3. Scan Preset
+public enum ScanPreset: String, CaseIterable, Identifiable {
+    case fast = "Fast"
+    case balanced = "Balanced"
+    case quality = "Quality"
+
+    public var id: String { rawValue }
+
+    // Max pixel dimension for the longest side (0 = no resize)
+    internal var maxPixelDimension: CGFloat {
+        switch self {
+        case .fast: return 1600
+        case .balanced: return 2400
+        case .quality: return 0
+        }
+    }
+
+    // JPEG compression quality (0...1). Used only when resizing/compressing.
+    internal var jpegQuality: CGFloat {
+        switch self {
+        case .fast: return 0.60
+        case .balanced: return 0.80
+        case .quality: return 0.92
+        }
+    }
+}
+
 // Section 3. Result
 public enum DocumentCameraResult {
     case success(pages: [ScannedPage])
@@ -33,10 +61,19 @@ public enum DocumentCameraResult {
 public struct DocumentCamera: UIViewControllerRepresentable {
 
     // Section 4.1 Callback
+    private let preset: ScanPreset
+
     private let onResult: (DocumentCameraResult) -> Void
 
     // Section 4.2 Init
-    public init(onResult: @escaping (DocumentCameraResult) -> Void) {
+    public init(preset: ScanPreset = .balanced, onResult: @escaping (DocumentCameraResult) -> Void) {
+        self.preset = preset
+        self.onResult = onResult
+    }
+
+    // Convenience init for callers storing presets as raw strings (e.g., AppStorage)
+    public init(presetRawValue: String, onResult: @escaping (DocumentCameraResult) -> Void) {
+        self.preset = ScanPreset(rawValue: presetRawValue) ?? .balanced
         self.onResult = onResult
     }
 
@@ -63,7 +100,7 @@ public struct DocumentCamera: UIViewControllerRepresentable {
 
     // Section 4.5 Coordinator
     public func makeCoordinator() -> DocumentCameraCoordinator {
-        DocumentCameraCoordinator(onResult: onResult)
+        DocumentCameraCoordinator(preset: preset, onResult: onResult)
     }
 }
 

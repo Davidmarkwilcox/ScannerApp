@@ -137,20 +137,18 @@ struct LibraryView: View {
             .onAppear {
                 reloadDocuments()
             }
-            // Section 2.7 Delete confirmation
-            .confirmationDialog(
+            // Section 2.7 Delete confirmation (centered alert)
+            .alert(
                 "Delete Document?",
                 isPresented: $isShowingDeleteConfirm,
-                titleVisibility: .visible
-            ) {
+                presenting: deleteTarget
+            ) { _ in
                 Button("Delete", role: .destructive) {
                     performDelete()
                 }
                 Button("Cancel", role: .cancel) { }
-            } message: {
-                if let doc = deleteTarget {
-                    Text("This will permanently delete “\(doc.title)” from this device.")
-                }
+            } message: { doc in
+                Text("This will permanently delete “\(doc.title)” from this device.")
             }
             // Section 2.8 Rename sheet
             .sheet(isPresented: $isShowingRenameSheet) {
