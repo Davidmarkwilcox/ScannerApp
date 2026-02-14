@@ -3,12 +3,14 @@
 // Description:
 // Library screen for ScannerApp.
 // - Lists locally persisted scanner documents (draft + savedLocal states).
-// - Provides row actions: open/view, rename, delete, and Share PDF.
+// - Provides row actions: open/view, rename, delete, Share PDF, and Share Images.
 // - Share PDF will generate output/document.pdf on-demand (via ScannerKit) if missing.
+// - Share Images shares the persisted page JPEGs (pages/001.jpg, 002.jpg, ...).
 // Interactions:
 // - Uses ScannerKit.ScannerDocumentStore for listing/rename/delete.
 // - Uses ScannerKit.ScannerDraftPersistence.pdfURLForSharing(documentID:) to obtain/generate a PDF URL.
-// - Uses ScannerKit.ScannerDocumentLoader to load pages when opening ViewerView.
+// - Uses ScannerKit.ScannerDraftPersistence.pageImageURLsForSharing(documentID:) to obtain page image URLs.
+// - Uses ScannerKit.ScannerDocumentLoader to load pages when resuming ReviewView.
 //
 // Section 1. Imports
 import SwiftUI
@@ -32,7 +34,7 @@ struct LibraryView: View {
 
     // Section 2.4 Share UI
     @State private var isShowingShareSheet: Bool = false
-    @State private var shareURL: URL? = nil
+    @State private var shareItems: [Any] = []
     @State private var shareErrorMessage: String = ""
     @State private var isShowingShareError: Bool = false
 
@@ -56,7 +58,7 @@ struct LibraryView: View {
                     // Section 2.5.2 Documents
                     ForEach(documents) { doc in
                         NavigationLink {
-                            DocumentViewerRouteView(metadata: doc)
+                            DocumentReviewRouteView(metadata: doc)
                         } label: {
                             HStack(alignment: .center, spacing: 12) {
                                 LibraryThumbnailView(documentID: doc.documentID)
@@ -86,6 +88,13 @@ struct LibraryView: View {
                             .tint(Theme.Colors.accent)
 
                             Button {
+                                requestShareImages(doc)
+                            } label: {
+                                Label("Share Images", systemImage: "photo.on.rectangle")
+                            }
+                            .tint(Theme.Colors.metallicGrey2)
+
+                            Button {
                                 requestRename(doc)
                             } label: {
                                 Label("Rename", systemImage: "pencil")
@@ -104,6 +113,12 @@ struct LibraryView: View {
                                 requestSharePDF(doc)
                             } label: {
                                 Label("Share PDF", systemImage: "square.and.arrow.up")
+                            }
+
+                            Button {
+                                requestShareImages(doc)
+                            } label: {
+                                Label("Share Images", systemImage: "photo.on.rectangle")
                             }
 
                             Button {
@@ -166,8 +181,8 @@ struct LibraryView: View {
             }
             // Section 2.9 Share sheet
             .sheet(isPresented: $isShowingShareSheet) {
-                if let url = shareURL {
-                    ShareSheet(activityItems: [url])
+                if !shareItems.isEmpty {
+                    ShareSheet(activityItems: shareItems)
                 } else {
                     Text("Nothing to share")
                         .onAppear { isShowingShareSheet = false }
@@ -192,11 +207,11 @@ struct LibraryView: View {
         }
     }
 
-    // Section 3.2 Share
+    // Section 3.2 Share PDF
     private func requestSharePDF(_ doc: ScannerDocumentMetadata) {
         do {
             let url = try ScannerDraftPersistence.pdfURLForSharing(documentID: doc.documentID)
-            shareURL = url
+            shareItems = [url]
             isShowingShareSheet = true
             if ScannerDebug.isEnabled {
                 ScannerDebug.writeLog("LibraryView Share PDF documentID=\(doc.documentID.uuidString) url=\(url.path)")
@@ -210,7 +225,25 @@ struct LibraryView: View {
         }
     }
 
-    // Section 3.3 Rename
+    // Section 3.3 Share Images
+    private func requestShareImages(_ doc: ScannerDocumentMetadata) {
+        do {
+            let urls = try ScannerDraftPersistence.pageImageURLsForSharing(documentID: doc.documentID)
+            shareItems = urls
+            isShowingShareSheet = true
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("LibraryView Share Images documentID=\(doc.documentID.uuidString) count=\(urls.count)")
+            }
+        } catch {
+            shareErrorMessage = error.localizedDescription
+            isShowingShareError = true
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("LibraryView Share Images failed documentID=\(doc.documentID.uuidString): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // Section 3.4 Rename
     private func requestRename(_ doc: ScannerDocumentMetadata) {
         renameTarget = doc
         renameText = doc.title
@@ -239,7 +272,7 @@ struct LibraryView: View {
         renameTarget = nil
     }
 
-    // Section 3.4 Delete
+    // Section 3.5 Delete
     private func requestDelete(_ doc: ScannerDocumentMetadata) {
         deleteTarget = doc
         isShowingDeleteConfirm = true
@@ -377,7 +410,7 @@ private struct LibraryThumbnailView: View {
 }
 
 // Section 7. Viewer Route
-private struct DocumentViewerRouteView: View {
+private struct DocumentReviewRouteView: View {
 
     // Section 7.1 Input
     let metadata: ScannerDocumentMetadata
@@ -413,10 +446,10 @@ private struct DocumentViewerRouteView: View {
                 }
                 .padding()
                 .scannerScreen()
-                .navigationTitle("Viewer")
+                .navigationTitle("Review")
                 .navigationBarTitleDisplayMode(.inline)
             } else {
-                ViewerView(pages: pages, title: metadata.title)
+                ReviewView(pages: pages, documentID: metadata.documentID)
             }
         }
         .onAppear {

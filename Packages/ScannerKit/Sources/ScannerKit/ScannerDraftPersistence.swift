@@ -431,6 +431,41 @@ public enum ScannerDraftPersistence {
 
 
 
+
+// Section 2.9.1 Public API (Share Images)
+/// Returns the on-disk page image URLs for the given document, sorted in page order (001.jpg, 002.jpg, ...).
+/// - Notes:
+///   - This does not generate anything. It simply returns persisted page JPEGs under /pages.
+///   - If no page JPEGs exist, throws DraftError.emptyPages.
+public static func pageImageURLsForSharing(
+    documentID: UUID,
+    fileManager: FileManager = .default
+) throws -> [URL] {
+
+    let paths = ScannerDocumentPaths(documentID: documentID)
+    let pagesDir = try paths.pagesDirectoryURL(fileManager: fileManager)
+
+    let jpgURLs: [URL] = try fileManager.contentsOfDirectory(
+        at: pagesDir,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+    )
+    .filter { url in
+        let ext = url.pathExtension.lowercased()
+        return ext == "jpg" || ext == "jpeg"
+    }
+    .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+    guard !jpgURLs.isEmpty else {
+        debugLog("pageImageURLsForSharing found no page JPEGs in: \(pagesDir.path)")
+        throw DraftError.emptyPages
+    }
+
+    debugLog("pageImageURLsForSharing returning \(jpgURLs.count) images from: \(pagesDir.path)")
+    return jpgURLs
+}
+
+
     // Section 2.10 Debug logging helper
     private static func debugLog(_ message: String) {
         guard isDebugEnabled else { return }

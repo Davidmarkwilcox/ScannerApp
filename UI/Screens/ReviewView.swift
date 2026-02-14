@@ -19,6 +19,9 @@ import ScannerKit
 struct ReviewView: View {
 
     // Section 2.1 State (UI-owned)
+    @AppStorage("scanner.scanPreset") private var scanPresetRaw: String = "Balanced"
+
+    @State private var isPresentingCamera: Bool = false
     @State private var pages: [ScannerKit.ScannedPage]
     @State private var selectedPage: ScannerKit.ScannedPage? = nil
 
@@ -39,8 +42,9 @@ struct ReviewView: View {
     @Environment(\.editMode) private var editMode
 
     // Section 2.3 Init
-    init(pages: [ScannerKit.ScannedPage]) {
+    init(pages: [ScannerKit.ScannedPage], documentID: UUID? = nil) {
         _pages = State(initialValue: pages)
+        _currentDocumentID = State(initialValue: documentID)
     }
 
     // Section 2.4 Body
@@ -103,7 +107,7 @@ struct ReviewView: View {
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
-                        .frame(minHeight: min(520, CGFloat(pages.count) * 92.0))
+                        .frame(minHeight: max(84, CGFloat(pages.count) * 92.0))
                         .environment(\.defaultMinListRowHeight, 84)
                     }
                 }
@@ -117,10 +121,42 @@ struct ReviewView: View {
         .navigationTitle("Review")
         .toolbar { reviewToolbar }
         .fullScreenCover(item: $selectedPage) { page in
-            // Section 2.5 Full-screen viewer (ScannerApp-local placeholder)
-            LocalPageViewerPlaceholder(page: page) {
-                selectedPage = nil
+            // Section 2.5 Full-screen viewer (shared with Library behavior)
+            // NOTE: We present ViewerView inside a NavigationStack so it behaves the same as Library → Viewer.
+            NavigationStack {
+                ViewerView(pages: [page], title: "Page")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { selectedPage = nil }
+                        }
+                    }
             }
+        }
+
+
+        // Section 2.6 Add Pages camera sheet
+        .sheet(isPresented: $isPresentingCamera) {
+            DocumentCamera(presetRawValue: scanPresetRaw) { result in
+                switch result {
+                case .success(let newPages):
+                    let startIndex = pages.count
+                    let appended: [ScannerKit.ScannedPage] = newPages.enumerated().map { offset, page in
+                        ScannerKit.ScannedPage(id: page.id, pageIndex: startIndex + offset, image: page.image, createdAt: page.createdAt)
+                    }
+                    pages.append(contentsOf: appended)
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Added \(appended.count) page(s). total=\(pages.count)") }
+
+                case .cancelled:
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages cancelled") }
+
+                case .failure(let error):
+                    saveDraftAlertTitle = "Scan Failed"
+                    saveDraftAlertMessage = error.localizedDescription
+                    isShowingSaveDraftAlert = true
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages failed: \(error.localizedDescription)") }
+                }
+            }
+            .ignoresSafeArea()
         }
 
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
@@ -158,7 +194,18 @@ struct ReviewView: View {
             .disabled(pages.isEmpty)
         }
 
-        // Section 3.3 Edit (reorder/delete)
+        // Section 3.3 Add Pages
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                isPresentingCamera = true
+                if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages tapped (preset=\(scanPresetRaw))") }
+            } label: {
+                Label("Add Pages", systemImage: "plus.viewfinder")
+            }
+            .tint(Theme.Colors.textPrimary)
+        }
+
+        // Section 3.4 Edit (reorder/delete)
         ToolbarItem(placement: .navigationBarTrailing) {
             EditButton()
                 .tint(Theme.Colors.textPrimary)
