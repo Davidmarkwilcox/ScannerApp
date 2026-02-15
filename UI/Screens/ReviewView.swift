@@ -3,12 +3,12 @@
 // Description:
 // Review screen for ScannerApp.
 // - Displays captured pages from ScannerKit.
-// - Provides review tools (Option 2): reorder, delete, rotate.
-// ScannerKit owns manipulation transforms; ScannerApp owns UI/state.
+// - Provides review tools: reorder, delete, rotate.
+// - Presents ViewerView full-screen for zoom/rotate viewing.
 //
-// NOTE (2026-02-11): ScannerKitUI has been removed. This file now uses a ScannerApp-local
-// full-screen viewer placeholder (LocalPageViewerPlaceholder) until the SwiftUI-native
-// zoom/expand viewer is rebuilt inside ScannerApp.
+// Notes:
+// - Review owns UI state; ScannerKit owns image transforms (rotated90).
+// - `viewerRefreshToken` is bumped after mutations to force SwiftUI to refresh thumbnails and viewer images.
 //
 // Section 1. Imports
 import SwiftUI
@@ -23,7 +23,16 @@ struct ReviewView: View {
 
     @State private var isPresentingCamera: Bool = false
     @State private var pages: [ScannerKit.ScannedPage]
-    @State private var selectedPage: ScannerKit.ScannedPage? = nil
+
+    /// Selected page index for full-screen viewer presentation.
+    @State private var selectedPageIndex: Int? = nil
+
+    /// Refresh token for ViewerView + row thumbnails (workaround for SwiftUI image caching).
+    @State private var viewerRefreshToken: Int = 0
+
+
+    /// Track whether edits (rotate/reorder/delete/add) have occurred since last persistence.
+    @State private var hasUnsavedEdits: Bool = false
 
     // Section 2.1.0 Document identity
     @State private var currentDocumentID: UUID? = nil
@@ -32,11 +41,6 @@ struct ReviewView: View {
     @State private var isShowingSaveDraftAlert: Bool = false
     @State private var saveDraftAlertTitle: String = ""
     @State private var saveDraftAlertMessage: String = ""
-
-
-    // Section 2.1.2 Export/Share UI state
-    // NOTE: We present the share sheet via UIKit directly to avoid SwiftUI sheet timing/state edge-cases.
-    // (Keeping this section placeholder for future UI-driven share flows.)
 
     // Section 2.2 Environment
     @Environment(\.editMode) private var editMode
@@ -47,118 +51,17 @@ struct ReviewView: View {
         _currentDocumentID = State(initialValue: documentID)
     }
 
-    // Section 2.4 Body
+    // Section 2.4 Body (intentionally thin to avoid Swift type-check blowups)
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-
-                // Section 2.4.1 Header
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("Review")
-                        .font(Theme.Typography.title)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-
-                    Text("Reorder, rotate, or delete pages before saving/exporting.")
-                        .font(Theme.Typography.subheadline)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-
-                    Text("Pages: \(pages.count)")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.textSecondary)
-                }
-                .scannerGlassCard(padding: Theme.Spacing.lg)
-
-                // Section 2.4.2 Pages list (reorder/delete/rotate)
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Captured Pages")
-                            .font(Theme.Typography.headline)
-                            .foregroundStyle(Theme.Colors.textPrimary)
-
-                        Spacer()
-
-                        // Small status indicator when in edit mode.
-                        if editMode?.wrappedValue.isEditing == true {
-                            Text("Editing")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.textSecondary)
-                        }
-                    }
-
-                    if pages.isEmpty {
-                        Text("No pages captured yet.")
-                            .font(Theme.Typography.body)
-                            .foregroundStyle(Theme.Colors.textSecondary)
-                    } else {
-                        List {
-                            ForEach(pages) { page in
-                                ReviewPageRow(
-                                    page: page,
-                                    isEditing: editMode?.wrappedValue.isEditing == true,
-                                    onRotateClockwise: { rotate(pageID: page.id, clockwise: true) },
-                                    onRotateCounterClockwise: { rotate(pageID: page.id, clockwise: false) },
-                                    onTap: { selectedPage = page }
-                                )
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                            }
-                            .onMove(perform: movePages)
-                            .onDelete(perform: deletePages)
-                        }
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: max(84, CGFloat(pages.count) * 92.0))
-                        .environment(\.defaultMinListRowHeight, 84)
-                    }
-                }
-                .scannerGlassCard(padding: Theme.Spacing.lg)
-
-                Spacer(minLength: Theme.Spacing.xl)
-            }
-            .padding(Theme.Spacing.lg)
+            content
+                .padding(Theme.Spacing.lg)
         }
         .scannerScreen()
         .navigationTitle("Review")
         .toolbar { reviewToolbar }
-        .fullScreenCover(item: $selectedPage) { page in
-            // Section 2.5 Full-screen viewer (shared with Library behavior)
-            // NOTE: We present ViewerView inside a NavigationStack so it behaves the same as Library → Viewer.
-            NavigationStack {
-                ViewerView(pages: [page], title: "Page")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { selectedPage = nil }
-                        }
-                    }
-            }
-        }
-
-
-        // Section 2.6 Add Pages camera sheet
-        .sheet(isPresented: $isPresentingCamera) {
-            DocumentCamera(presetRawValue: scanPresetRaw) { result in
-                switch result {
-                case .success(let newPages):
-                    let startIndex = pages.count
-                    let appended: [ScannerKit.ScannedPage] = newPages.enumerated().map { offset, page in
-                        ScannerKit.ScannedPage(id: page.id, pageIndex: startIndex + offset, image: page.image, createdAt: page.createdAt)
-                    }
-                    pages.append(contentsOf: appended)
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Added \(appended.count) page(s). total=\(pages.count)") }
-
-                case .cancelled:
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages cancelled") }
-
-                case .failure(let error):
-                    saveDraftAlertTitle = "Scan Failed"
-                    saveDraftAlertMessage = error.localizedDescription
-                    isShowingSaveDraftAlert = true
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages failed: \(error.localizedDescription)") }
-                }
-            }
-            .ignoresSafeArea()
-        }
-
+        .fullScreenCover(isPresented: isViewerPresented) { viewerCover }
+        .sheet(isPresented: $isPresentingCamera) { cameraSheet }
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -167,34 +70,174 @@ struct ReviewView: View {
         .onAppear {
             if ScannerDebug.isEnabled { ScannerDebug.writeLog("ReviewView appeared with \(pages.count) pages") }
         }
+        .onDisappear {
+            persistEditsIfNeeded()
+        }
+    }
+
+    // Section 2.5 Content
+    private var content: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            headerCard
+            pagesCard
+            Spacer(minLength: Theme.Spacing.xl)
+        }
+    }
+
+    // Section 2.5.1 Header card
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text("Review")
+                .font(Theme.Typography.title)
+                .foregroundStyle(Theme.Colors.textPrimary)
+
+            Text("Reorder, rotate, or delete pages before saving/exporting.")
+                .font(Theme.Typography.subheadline)
+                .foregroundStyle(Theme.Colors.textSecondary)
+
+            Text("Pages: \(pages.count)")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.textSecondary)
+        }
+        .scannerGlassCard(padding: Theme.Spacing.lg)
+    }
+
+    // Section 2.5.2 Pages card
+    private var pagesCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Captured Pages")
+                    .font(Theme.Typography.headline)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+
+                Spacer()
+
+                if editMode?.wrappedValue.isEditing == true {
+                    Text("Editing")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                }
+            }
+
+            if pages.isEmpty {
+                Text("No pages captured yet.")
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+            } else {
+                pagesList
+            }
+        }
+        .scannerGlassCard(padding: Theme.Spacing.lg)
+    }
+
+    // Section 2.5.2.1 Pages list
+    private var pagesList: some View {
+        List {
+            ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
+                ReviewPageRow(
+                    page: page,
+                    refreshToken: viewerRefreshToken,
+                    isEditing: editMode?.wrappedValue.isEditing == true,
+                    onRotateClockwise: { rotate(pageID: page.id, clockwise: true) },
+                    onRotateCounterClockwise: { rotate(pageID: page.id, clockwise: false) },
+                    onTap: { selectedPageIndex = index }
+                )
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+            .onMove(perform: movePages)
+            .onDelete(perform: deletePages)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: max(84, CGFloat(pages.count) * 92.0))
+        .environment(\.defaultMinListRowHeight, 84)
+    }
+
+    // Section 2.6 Viewer presentation binding
+    private var isViewerPresented: Binding<Bool> {
+        Binding(
+            get: { selectedPageIndex != nil },
+            set: { isPresented in
+                if !isPresented { selectedPageIndex = nil }
+            }
+        )
+    }
+
+    // Section 2.7 Viewer cover
+    @ViewBuilder
+    private var viewerCover: some View {
+        if let startIndex = selectedPageIndex {
+            NavigationStack {
+                ViewerView(
+                    pages: $pages,
+                    title: "Review",
+                    initialIndex: startIndex,
+                    refreshToken: viewerRefreshToken,
+                    onRotatePage: { index, direction in
+                        let clockwise = (direction == .right)
+                        guard pages.indices.contains(index) else { return }
+                        rotate(pageID: pages[index].id, clockwise: clockwise)
+                    }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { selectedPageIndex = nil }
+                    }
+                }
+            }
+        }
+    }
+
+    // Section 2.8 Camera sheet
+    private var cameraSheet: some View {
+        DocumentCamera(presetRawValue: scanPresetRaw) { result in
+            switch result {
+            case .success(let newPages):
+                let startIndex = pages.count
+                let appended: [ScannerKit.ScannedPage] = newPages.enumerated().map { offset, page in
+                    ScannerKit.ScannedPage(id: page.id, pageIndex: startIndex + offset, image: page.image, createdAt: page.createdAt)
+                }
+                pages.append(contentsOf: appended)
+                hasUnsavedEdits = true
+                viewerRefreshToken &+= 1
+
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("[ReviewView] Added \(appended.count) page(s). total=\(pages.count) viewerRefreshToken=\(viewerRefreshToken)")
+                }
+
+            case .cancelled:
+                if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages cancelled") }
+
+            case .failure(let error):
+                saveDraftAlertTitle = "Scan Failed"
+                saveDraftAlertMessage = error.localizedDescription
+                isShowingSaveDraftAlert = true
+                if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages failed: \(error.localizedDescription)") }
+            }
+        }
+        .ignoresSafeArea()
     }
 
     // Section 3. Toolbar
     @ToolbarContentBuilder
     private var reviewToolbar: some ToolbarContent {
-        // Section 3.1 Save Draft
         ToolbarItem(placement: .navigationBarLeading) {
-            Button {
-                saveDraft()
-            } label: {
+            Button { saveDraft() } label: {
                 Label("Save Draft", systemImage: "tray.and.arrow.down")
             }
             .tint(Theme.Colors.textPrimary)
             .disabled(pages.isEmpty)
         }
 
-        // Section 3.2 Export PDF + Share
         ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                exportPDFAndShare()
-            } label: {
+            Button { exportPDFAndShare() } label: {
                 Label("Share PDF", systemImage: "square.and.arrow.up")
             }
             .tint(Theme.Colors.textPrimary)
             .disabled(pages.isEmpty)
         }
 
-        // Section 3.3 Add Pages
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
                 isPresentingCamera = true
@@ -205,14 +248,13 @@ struct ReviewView: View {
             .tint(Theme.Colors.textPrimary)
         }
 
-        // Section 3.4 Edit (reorder/delete)
         ToolbarItem(placement: .navigationBarTrailing) {
             EditButton()
                 .tint(Theme.Colors.textPrimary)
         }
     }
 
-    // Section 4. Actions (UI invokes ScannerKit transforms)
+    // Section 4. Actions
     private func saveDraft() {
         do {
             let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
@@ -224,8 +266,8 @@ struct ReviewView: View {
 
             saveDraftAlertTitle = "Draft Saved"
             saveDraftAlertMessage = "Saved \(result.pageCount) page(s).\n\nDocument ID:\n\(result.documentID.uuidString)"
-
             isShowingSaveDraftAlert = true
+
         } catch {
             if ScannerDebug.isEnabled {
                 ScannerDebug.writeLog("Save draft failed: \(error.localizedDescription)")
@@ -237,7 +279,6 @@ struct ReviewView: View {
         }
     }
 
-
     private func exportPDFAndShare() {
         do {
             let fileManager = FileManager.default
@@ -246,7 +287,6 @@ struct ReviewView: View {
                 ScannerDebug.writeLog("[ReviewView] Share tapped. documentID=\(currentDocumentID?.uuidString ?? "nil") pages=\(pages.count)")
             }
 
-            // Ensure we have a persisted document ID (draft) so ScannerKit can generate a shareable PDF.
             let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
             currentDocumentID = result.documentID
 
@@ -254,16 +294,11 @@ struct ReviewView: View {
                 ScannerDebug.writeLog("[ReviewView] saveDraft ok. documentID=\(result.documentID.uuidString) pages=\(result.pageCount)")
             }
 
-            // IMPORTANT:
-            // Share must work on the first save cycle. Use ScannerKit's "pdfURLForSharing" helper which:
-            // - returns output/document.pdf if it already exists, OR
-            // - generates it from persisted page JPEGs and updates metadata to savedLocal.
             let pdfURL = try ScannerDraftPersistence.pdfURLForSharing(
                 documentID: result.documentID,
                 fileManager: fileManager
             )
 
-            // Diagnostics: validate existence + size to avoid silent share-sheet no-ops.
             let exists = fileManager.fileExists(atPath: pdfURL.path)
             let fileSize: Int64 = (try? fileManager.attributesOfItem(atPath: pdfURL.path)[.size] as? Int64) ?? -1
 
@@ -279,7 +314,6 @@ struct ReviewView: View {
                 )
             }
 
-            // Present share sheet on the next run-loop tick to avoid UIKit presentation timing edge-cases.
             DispatchQueue.main.async {
                 self.presentShareSheet(url: pdfURL, documentID: result.documentID)
             }
@@ -295,38 +329,85 @@ struct ReviewView: View {
         }
     }
 
-
     private func rotate(pageID: UUID, clockwise: Bool) {
         guard let idx = pages.firstIndex(where: { $0.id == pageID }) else { return }
         pages[idx] = pages[idx].rotated90(clockwise: clockwise)
+        hasUnsavedEdits = true
+
+        viewerRefreshToken &+= 1
 
         if ScannerDebug.isEnabled {
-            ScannerDebug.writeLog("Rotated page id=\(pageID) clockwise=\(clockwise)")
+            ScannerDebug.writeLog("Rotated page id=\(pageID) clockwise=\(clockwise) viewerRefreshToken=\(viewerRefreshToken)")
         }
     }
 
     private func deletePages(at offsets: IndexSet) {
         pages.remove(atOffsets: offsets)
         pages = ScannerKit.ScannedPage.reindexed(pages)
+        hasUnsavedEdits = true
+        viewerRefreshToken &+= 1
 
         if ScannerDebug.isEnabled {
-            ScannerDebug.writeLog("Deleted pages at offsets=\(Array(offsets)) -> remaining=\(pages.count)")
+            ScannerDebug.writeLog("Deleted pages at offsets=\(Array(offsets)) -> remaining=\(pages.count) viewerRefreshToken=\(viewerRefreshToken)")
         }
     }
 
     private func movePages(from source: IndexSet, to destination: Int) {
         pages.move(fromOffsets: source, toOffset: destination)
         pages = ScannerKit.ScannedPage.reindexed(pages)
+        hasUnsavedEdits = true
+        viewerRefreshToken &+= 1
 
         if ScannerDebug.isEnabled {
-            ScannerDebug.writeLog("Moved pages from=\(Array(source)) to=\(destination)")
+            ScannerDebug.writeLog("Moved pages from=\(Array(source)) to=\(destination) viewerRefreshToken=\(viewerRefreshToken)")
         }
     }
 
 
+    // Section 4.1 Persist edits (so Library thumbnails reflect rotations/reorders/deletes)
+    private func persistEditsIfNeeded() {
+        guard hasUnsavedEdits else { return }
+
+        // Only persist if we already have an identity (i.e., came from Library or has been saved at least once).
+        // If there is no documentID yet, we avoid implicitly creating one on dismiss; user can tap Save Draft.
+        guard let docID = currentDocumentID else {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] persistEditsIfNeeded skipped (no documentID). hasUnsavedEdits=true")
+            }
+            return
+        }
+
+        // Ensure thumbnail regenerates so Library reflects edits immediately.
+        // (Some persistence flows only create thumbnail if missing.)
+        do {
+            let paths = ScannerDocumentPaths(documentID: docID)
+            let thumbURL = try paths.thumbnailURL()
+            if FileManager.default.fileExists(atPath: thumbURL.path) {
+                try FileManager.default.removeItem(at: thumbURL)
+                if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Deleted thumbnail before persist: \(thumbURL.lastPathComponent)") }
+            }
+        } catch {
+            if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] WARNING: Could not delete thumbnail before persist: \(error.localizedDescription)") }
+        }
+
+        do {
+            let result = try ScannerDraftPersistence.saveDraft(documentID: docID, pages: pages)
+            currentDocumentID = result.documentID
+            hasUnsavedEdits = false
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] persistEditsIfNeeded ok documentID=\(result.documentID.uuidString) pages=\(result.pageCount)")
+            }
+        } catch {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView] persistEditsIfNeeded FAILED documentID=\(docID.uuidString): \(error.localizedDescription)")
+            }
+            // Keep hasUnsavedEdits=true so a future attempt (e.g., user taps Save Draft) can persist.
+        }
+    }
+
     // Section 4.2 Share Presentation (UIKit)
     private func presentShareSheet(url: URL, documentID: UUID) {
-        // Find the top-most view controller in the active foreground scene.
         guard let topVC = ReviewViewTopMostViewControllerResolver.topMostViewController() else {
             if ScannerDebug.isEnabled {
                 ScannerDebug.writeLog("[ReviewView] ERROR: Unable to resolve top-most UIViewController for share presentation")
@@ -343,7 +424,6 @@ struct ReviewView: View {
         }
 
         let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        // iPhone: no popover config required.
         topVC.present(activityVC, animated: true)
     }
 }
@@ -353,6 +433,7 @@ private struct ReviewPageRow: View {
 
     // Section 5.1 Inputs
     let page: ScannerKit.ScannedPage
+    let refreshToken: Int
     let isEditing: Bool
     let onRotateClockwise: () -> Void
     let onRotateCounterClockwise: () -> Void
@@ -373,6 +454,8 @@ private struct ReviewPageRow: View {
                     RoundedRectangle(cornerRadius: Theme.Corners.card, style: .continuous)
                         .stroke(Theme.Colors.glassStroke.opacity(0.35), lineWidth: 1)
                 )
+                // Force refresh when the underlying UIImage changes (rotation, etc.).
+                .id("\(page.id.uuidString)-\(refreshToken)")
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text("Page \(page.pageIndex + 1)")
@@ -406,7 +489,6 @@ private struct ReviewPageRow: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
-            // Use Theme's existing frosted approach without inventing new tokens.
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Corners.chip, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Corners.chip, style: .continuous)
@@ -423,46 +505,10 @@ private struct ReviewPageRow: View {
     }
 }
 
-// Section 6. ScannerApp-local placeholder viewer (temporary)
-private struct LocalPageViewerPlaceholder: View {
-    let page: ScannerKit.ScannedPage
-    let onClose: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.black.ignoresSafeArea()
-
-            // Basic viewing: no zoom yet (intentionally).
-            Image(uiImage: page.image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
-
-            Button(action: {
-                if ScannerDebug.isEnabled { ScannerDebug.writeLog("Closed placeholder viewer for page id=\(page.id)") }
-                onClose()
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding()
-            }
-            .accessibilityLabel("Close page viewer")
-        }
-        .onAppear {
-            if ScannerDebug.isEnabled { ScannerDebug.writeLog("Opened placeholder viewer for page id=\(page.id)") }
-        }
-    }
-}
-
-
 // Section 6.1 Top-most view controller resolver (UIKit)
 private enum ReviewViewTopMostViewControllerResolver {
 
     static func topMostViewController() -> UIViewController? {
-        // Active foreground window scene.
         let scenes = UIApplication.shared.connectedScenes
         let windowScene = scenes
             .compactMap { $0 as? UIWindowScene }
@@ -494,7 +540,6 @@ private extension UIWindowScene {
 
 // Section 7. Preview
 #Preview {
-    // Preview uses an empty pages array to avoid embedding sample images.
     NavigationStack { ReviewView(pages: []) }
 }
 

@@ -23,6 +23,9 @@ struct LibraryView: View {
     // Section 2.1 State
     @State private var documents: [ScannerDocumentMetadata] = []
 
+    // Section 2.1.0 Thumbnail refresh token (forces thumbnail views to reload file-based images)
+    @State private var thumbnailRefreshToken: Int = 0
+
     // Section 2.2 Rename UI
     @State private var isShowingRenameSheet: Bool = false
     @State private var renameText: String = ""
@@ -61,7 +64,7 @@ struct LibraryView: View {
                             DocumentReviewRouteView(metadata: doc)
                         } label: {
                             HStack(alignment: .center, spacing: 12) {
-                                LibraryThumbnailView(documentID: doc.documentID)
+                                LibraryThumbnailView(documentID: doc.documentID, refreshToken: thumbnailRefreshToken)
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(doc.title)
@@ -202,8 +205,9 @@ struct LibraryView: View {
     // Section 3.1 Reload
     private func reloadDocuments() {
         documents = ScannerDocumentStore.listDocuments()
+        thumbnailRefreshToken &+= 1
         if ScannerDebug.isEnabled {
-            ScannerDebug.writeLog("LibraryView reloadDocuments count=\(documents.count)")
+            ScannerDebug.writeLog("LibraryView reloadDocuments count=\(documents.count) thumbToken=\(thumbnailRefreshToken)")
         }
     }
 
@@ -370,12 +374,12 @@ private struct LibraryThumbnailView: View {
 
     // Section 6.1 Input
     let documentID: UUID
+    let refreshToken: Int
 
     // Section 6.2 Body
     var body: some View {
-        let image = loadThumbnail()
-        return Group {
-            if let image {
+        Group {
+            if let image = loadThumbnail(refreshToken: refreshToken) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -395,14 +399,20 @@ private struct LibraryThumbnailView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Theme.Colors.glassStroke, lineWidth: 1)
         )
+        // Force SwiftUI to recreate the thumbnail view when the token changes.
+        .id("\(documentID.uuidString)-\(refreshToken)")
     }
 
     // Section 6.3 Loading
-    private func loadThumbnail() -> UIImage? {
+    private func loadThumbnail(refreshToken: Int) -> UIImage? {
+        // Avoid potential image caching by loading bytes -> UIImage(data:).
+        // refreshToken is intentionally unused except to influence view identity.
         do {
             let paths = ScannerDocumentPaths(documentID: documentID)
             let url = try paths.thumbnailURL()
-            return UIImage(contentsOfFile: url.path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            return UIImage(data: data)
         } catch {
             return nil
         }
