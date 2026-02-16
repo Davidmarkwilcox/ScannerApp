@@ -38,6 +38,10 @@ struct ReviewView: View {
     @State private var isRecognizingText: Bool = false
     @State private var lastRecognizedText: String = ""
 
+    // Section 2.1.4 Entity detection UI state
+    @State private var isShowingEntityActions: Bool = false
+    @State private var detectedEntities: [DetectedEntity] = []
+
     // Section 2.1.2 Layout constants (Captured Pages container)
     private let pagesListVisibleRowsMin: Int = 1
     private let pagesListVisibleRowsMax: Int = 4
@@ -56,6 +60,42 @@ struct ReviewView: View {
 
     // Section 2.2 Environment
     @Environment(\.editMode) private var editMode
+
+    // Section 2.2.1 Types (Entity Detection)
+    private enum DetectedEntityKind: String {
+        case url
+        case email
+        case phone
+    }
+
+    private struct DetectedEntity: Identifiable, Hashable {
+        let id: UUID = UUID()
+        let kind: DetectedEntityKind
+        let value: String
+
+        var displayTitle: String {
+            switch kind {
+            case .url: return value
+            case .email: return value
+            case .phone: return value
+            }
+        }
+
+        var openURL: URL? {
+            switch kind {
+            case .url:
+                // Ensure scheme for bare domains if needed.
+                if let url = URL(string: value), url.scheme != nil { return url }
+                if let url = URL(string: "https://\(value)") { return url }
+                return nil
+            case .email:
+                return URL(string: "mailto:\(value)")
+            case .phone:
+                let digits = value.filter { "0123456789+*#,".contains($0) }
+                return URL(string: "tel:\(digits)")
+            }
+        }
+    }
 
     // Section 2.3 Init
     init(pages: [ScannerKit.ScannedPage], documentID: UUID? = nil) {
@@ -78,6 +118,16 @@ struct ReviewView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(saveDraftAlertMessage)
+        }
+        .confirmationDialog("Detected Items", isPresented: $isShowingEntityActions, titleVisibility: .visible) {
+            ForEach(detectedEntities) { entity in
+                Button(entity.displayTitle) {
+                    openDetectedEntity(entity)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Tap an item to open it.")
         }
         .onAppear {
             if ScannerDebug.isEnabled { ScannerDebug.writeLog("ReviewView appeared with \(pages.count) pages") }
@@ -278,6 +328,13 @@ struct ReviewView: View {
                     }
                     .disabled(pages.isEmpty)
 
+                    Button {
+                        presentDetectedEntityActions()
+                    } label: {
+                        Label("Actions", systemImage: "link")
+                    }
+                    .disabled(pages.isEmpty)
+
                 } label: {
                     Image(systemName: "text.magnifyingglass")
                         .imageScale(.large)
@@ -471,6 +528,106 @@ struct ReviewView: View {
         saveDraftAlertTitle = "Copied"
         saveDraftAlertMessage = "Copied \(finalText.count) characters to the clipboard."
         isShowingSaveDraftAlert = true
+    }
+
+
+    // Section 4.0.2 Entity Detection (URLs / emails / phones)
+    private func presentDetectedEntityActions() {
+        // Prefer in-memory OCR from the most recent recognize run; fall back to persisted OCR.
+        var sourceText: String? = nil
+
+        let trimmed = lastRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            sourceText = trimmed
+        } else if let docID = currentDocumentID {
+            sourceText = ScannerDraftPersistence.ocrFullTextIfAvailable(documentID: docID)
+        }
+
+        guard let text = sourceText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            saveDraftAlertTitle = "No OCR Text"
+            saveDraftAlertMessage = "Run Text → Recognize Text first."
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        let entities = detectEntities(in: text)
+        guard !entities.isEmpty else {
+            saveDraftAlertTitle = "No Items Found"
+            saveDraftAlertMessage = "No links, emails, or phone numbers were detected."
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        detectedEntities = entities
+        isShowingEntityActions = true
+
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("[ReviewView][OCR] Detected entities count=\(entities.count)")
+        }
+    }
+
+    private func detectEntities(in text: String) -> [DetectedEntity] {
+        var results: [DetectedEntity] = []
+
+        // Detect URLs + phone numbers with NSDataDetector
+        do {
+            let types = NSTextCheckingResult.CheckingType.link.rawValue | NSTextCheckingResult.CheckingType.phoneNumber.rawValue
+            let detector = try NSDataDetector(types: types)
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+
+            detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+                guard let match = match else { return }
+
+                if match.resultType == .link, let url = match.url {
+                    results.append(DetectedEntity(kind: .url, value: url.absoluteString))
+                } else if match.resultType == .phoneNumber, let phone = match.phoneNumber {
+                    results.append(DetectedEntity(kind: .phone, value: phone))
+                }
+            }
+        } catch {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView][OCR] NSDataDetector init failed: \(error.localizedDescription)")
+            }
+        }
+
+        // Detect emails with regex (NSDataDetector doesn't reliably cover email)
+        let emailPattern = #"(?i)([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})"#
+        if let regex = try? NSRegularExpression(pattern: emailPattern, options: []) {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+                guard let match = match, match.numberOfRanges >= 2,
+                      let r = Range(match.range(at: 1), in: text) else { return }
+                results.append(DetectedEntity(kind: .email, value: String(text[r])))
+            }
+        }
+
+        // Deduplicate while preserving order; cap to 15 items.
+        var seen = Set<DetectedEntity>()
+        var deduped: [DetectedEntity] = []
+        for item in results {
+            if !seen.contains(item) {
+                seen.insert(item)
+                deduped.append(item)
+            }
+            if deduped.count >= 15 { break }
+        }
+
+        return deduped
+    }
+
+    private func openDetectedEntity(_ entity: DetectedEntity) {
+        guard let url = entity.openURL else {
+            saveDraftAlertTitle = "Can't Open"
+            saveDraftAlertMessage = "Invalid item: \(entity.value)"
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("[ReviewView][OCR] Opening entity kind=\(entity.kind.rawValue) url=\(url.absoluteString)")
+        }
+
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 
     private func rotate(pageID: UUID, clockwise: Bool) {
