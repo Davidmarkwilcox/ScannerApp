@@ -20,6 +20,13 @@
 import Foundation
 import UIKit
 
+// Section 1.1 Notifications
+public extension Notification.Name {
+    /// Posted after OCR results are persisted for a document.
+    /// userInfo: ["documentID": "<UUID>"]
+    static let scannerOCRDidUpdate = Notification.Name("ScannerKit.ScannerOCRDidUpdate")
+}
+
 // Section 2. ScannerDraftPersistence
 public enum ScannerDraftPersistence {
 
@@ -635,6 +642,11 @@ private static func sanitizeShareFilename(_ raw: String?) -> String? {
             let data = try makeOCREncoder().encode(result)
             try data.write(to: url, options: [.atomic])
             debugOCRLog("Saved OCR -> \(url.lastPathComponent) chars=\(fullText.count) pages=\(pages.count)")
+            NotificationCenter.default.post(
+                name: .scannerOCRDidUpdate,
+                object: nil,
+                userInfo: ["documentID": documentID.uuidString]
+            )
             return result
         } catch {
             debugOCRLog("ERROR saving OCR: \(error.localizedDescription)")

@@ -7,11 +7,13 @@
 // - Share PDF will generate output/document.pdf on-demand (via ScannerKit) if missing.
 // - Share Images shares the persisted page JPEGs (pages/001.jpg, 002.jpg, ...).
 // - Rename defaults with the current name pre-selected for quick overwrite.
+// - Provides Library search that matches scan title and (when available) persisted OCR text (ocr.json).
 //
 // Interactions:
 // - Uses ScannerKit.ScannerDocumentStore for listing/rename/delete.
 // - Uses ScannerKit.ScannerDraftPersistence.pdfURLForSharing(documentID:) to obtain/generate a PDF URL.
 // - Uses ScannerKit.ScannerDraftPersistence.pageImageURLsForSharing(documentID:) to obtain page image URLs.
+// - Uses ScannerKit.ScannerDraftPersistence.ocrFullTextIfAvailable(documentID:) to load OCR for searching.
 // - Uses ScannerKit.ScannerDocumentLoader to load pages when resuming ReviewView.
 //
 // Section 1. Imports
@@ -28,6 +30,12 @@ struct LibraryView: View {
     // Section 2.1.0 Thumbnail refresh token (forces thumbnail views to reload file-based images)
     @State private var thumbnailRefreshToken: Int = 0
 
+    // Section 2.1.1 Search
+    @State private var searchQuery: String = ""
+
+    // Section 2.1.2 OCR cache (loaded from persisted ocr.json per document)
+    @State private var ocrTextCache: [UUID: String] = [:]
+
     // Section 2.2 Rename UI
     @State private var renameTarget: ScannerDocumentMetadata? = nil
 
@@ -41,105 +49,37 @@ struct LibraryView: View {
     @State private var shareErrorMessage: String = ""
     @State private var isShowingShareError: Bool = false
 
-    // Section 2.5 Body
-    var body: some View {
-        NavigationStack {
-            List {
-                // Section 2.5.1 Empty state
-                if documents.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("No documents yet")
-                            .font(.headline)
-                            .foregroundStyle(Theme.Colors.textPrimary)
+    // Section 2.4.1 Derived
+    private var isSearching: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
-                        Text("Scan a document, then tap Save Draft to persist it locally.")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.Colors.textSecondary)
-                    }
-                    .padding(.vertical, 12)
-                } else {
-                    // Section 2.5.2 Documents
-                    ForEach(documents) { doc in
-                        NavigationLink {
-                            DocumentReviewRouteView(metadata: doc)
-                        } label: {
-                            HStack(alignment: .center, spacing: 12) {
-                                LibraryThumbnailView(documentID: doc.documentID, refreshToken: thumbnailRefreshToken)
+    private var displayedDocuments: [ScannerDocumentMetadata] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return documents }
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(doc.title)
-                                        .foregroundStyle(Theme.Colors.textPrimary)
+        let needle = q.lowercased()
 
-                                    Text("\(doc.pageCount) page(s) • \(doc.state.rawValue)")
-                                        .font(.caption)
-                                        .foregroundStyle(Theme.Colors.textSecondary)
+        return documents.filter { doc in
+            // Title match
+            if doc.title.lowercased().contains(needle) { return true }
 
-                                    Text(doc.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption2)
-                                        .foregroundStyle(Theme.Colors.textSecondary)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        // Section 2.5.2.1 Swipe actions
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                requestSharePDF(doc)
-                            } label: {
-                                Label("Share PDF", systemImage: "square.and.arrow.up")
-                            }
-                            .tint(Theme.Colors.accent)
-
-                            Button {
-                                requestShareImages(doc)
-                            } label: {
-                                Label("Share Images", systemImage: "photo.on.rectangle")
-                            }
-                            .tint(Theme.Colors.metallicGrey2)
-
-                            Button {
-                                requestRename(doc)
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-                            .tint(Theme.Colors.metallicGrey2)
-
-                            Button(role: .destructive) {
-                                requestDelete(doc)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                        // Section 2.5.2.2 Context menu (hard press)
-                        .contextMenu {
-                            Button {
-                                requestSharePDF(doc)
-                            } label: {
-                                Label("Share PDF", systemImage: "square.and.arrow.up")
-                            }
-
-                            Button {
-                                requestShareImages(doc)
-                            } label: {
-                                Label("Share Images", systemImage: "photo.on.rectangle")
-                            }
-
-                            Button {
-                                requestRename(doc)
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-
-                            Button(role: .destructive) {
-                                requestDelete(doc)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
+            // OCR match (cached if available; if not loaded yet, treat as non-match for now)
+            if let ocr = ocrTextCache[doc.documentID]?.lowercased(),
+               !ocr.isEmpty,
+               ocr.contains(needle) {
+                return true
             }
-            .listStyle(.insetGrouped)
+
+            return false
+        }
+    }
+
+    // Section 2.5 Body
+// Section 2.5 Body
+var body: some View {
+    NavigationStack {
+        libraryRoot
             .navigationTitle("Library")
             .toolbar {
                 // Section 2.6 Toolbar
@@ -154,6 +94,12 @@ struct LibraryView: View {
             }
             .onAppear {
                 reloadDocuments()
+            }
+            .onChange(of: searchQuery) { _ in
+                // Only load OCR text when actively searching; keeps Library snappy otherwise.
+                if isSearching {
+                    warmOCRCacheForSearch()
+                }
             }
             // Section 2.7 Delete confirmation (centered alert)
             .alert(
@@ -195,17 +141,235 @@ struct LibraryView: View {
             } message: {
                 Text(shareErrorMessage)
             }
+    }
+}
+
+// Section 2.5.A Root content (split out to keep compiler fast)
+private var libraryRoot: some View {
+    VStack(spacing: 0) {
+        searchBarView
+        documentsListView
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .scannerOCRDidUpdate)) { note in
+        guard let idString = note.userInfo?["documentID"] as? String,
+              let id = UUID(uuidString: idString) else { return }
+        refreshOCRCache(for: id)
+    }
+}
+
+// Section 2.5.B Search bar (above list container)
+private var searchBarView: some View {
+    VStack(spacing: 0) {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Theme.Colors.textSecondary)
+
+            TextField("Search title or text…", text: $searchQuery)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                .foregroundStyle(Theme.Colors.textPrimary)
+
+            if isSearching {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.Colors.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+}
+
+// Section 2.5.C Documents list container (split out to keep compiler fast)
+private var documentsListView: some View {
+    List {
+        if documents.isEmpty {
+            emptyLibraryState
+        } else if displayedDocuments.isEmpty {
+            noResultsState
+        } else {
+            ForEach(displayedDocuments) { doc in
+                documentRow(doc)
+            }
         }
     }
+    .listStyle(.insetGrouped)
+}
+
+// Section 2.5.D Empty state views
+private var emptyLibraryState: some View {
+    VStack(alignment: .leading, spacing: 8) {
+        Text("No documents yet")
+            .font(.headline)
+            .foregroundStyle(Theme.Colors.textPrimary)
+
+        Text("Scan a document, then tap Save Draft to persist it locally.")
+            .font(.subheadline)
+            .foregroundStyle(Theme.Colors.textSecondary)
+    }
+    .padding(.vertical, 12)
+}
+
+private var noResultsState: some View {
+    VStack(alignment: .leading, spacing: 8) {
+        Text("No matches")
+            .font(.headline)
+            .foregroundStyle(Theme.Colors.textPrimary)
+
+        Text("Try a different search term.")
+            .font(.subheadline)
+            .foregroundStyle(Theme.Colors.textSecondary)
+    }
+    .padding(.vertical, 12)
+}
+
+// Section 2.5.E Row builder
+private func documentRow(_ doc: ScannerDocumentMetadata) -> some View {
+    NavigationLink {
+        DocumentReviewRouteView(metadata: doc)
+    } label: {
+        HStack(alignment: .center, spacing: 12) {
+            LibraryThumbnailView(documentID: doc.documentID, refreshToken: thumbnailRefreshToken)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(doc.title)
+                    .foregroundStyle(Theme.Colors.textPrimary)
+
+                Text("\(doc.pageCount) page(s) • \(doc.state.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+
+                Text(doc.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(Theme.Colors.textSecondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        Button {
+            requestSharePDF(doc)
+        } label: {
+            Label("Share PDF", systemImage: "square.and.arrow.up")
+        }
+        .tint(Theme.Colors.accent)
+
+        Button {
+            requestShareImages(doc)
+        } label: {
+            Label("Share Images", systemImage: "photo.on.rectangle")
+        }
+        .tint(Theme.Colors.metallicGrey2)
+
+        Button {
+            requestRename(doc)
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+        .tint(Theme.Colors.metallicGrey2)
+
+        Button(role: .destructive) {
+            requestDelete(doc)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+    .contextMenu {
+        Button {
+            requestSharePDF(doc)
+        } label: {
+            Label("Share PDF", systemImage: "square.and.arrow.up")
+        }
+
+        Button {
+            requestShareImages(doc)
+        } label: {
+            Label("Share Images", systemImage: "photo.on.rectangle")
+        }
+
+        Button {
+            requestRename(doc)
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+
+        Button(role: .destructive) {
+            requestDelete(doc)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+}
 
     // Section 3. Actions
 
-    // Section 3.1 Reload
+    // Section 3.0 OCR cache warmup
+    private func warmOCRCacheForSearch() {
+        let docIDsToLoad = documents
+            .map { $0.documentID }
+            .filter { ocrTextCache[$0] == nil }
+
+        guard !docIDsToLoad.isEmpty else { return }
+
+        // Load on background queue; update cache on main.
+        DispatchQueue.global(qos: .userInitiated).async {
+            var newEntries: [UUID: String] = [:]
+            for id in docIDsToLoad {
+                if let text = ScannerDraftPersistence.ocrFullTextIfAvailable(documentID: id),
+                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    newEntries[id] = text
+                } else {
+                    // Cache empty string so we don't keep hitting disk for this doc during this session.
+                    newEntries[id] = ""
+                }
+            }
+
+            DispatchQueue.main.async {
+                for (k, v) in newEntries {
+                    ocrTextCache[k] = v
+                }
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("LibraryView warmOCRCacheForSearch loaded=\(newEntries.count)")
+                }
+            }
+        }
+    }
+
+    
+    // Section 2.1.3 OCR cache refresh (single document)
+    private func refreshOCRCache(for documentID: UUID) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let text = ScannerDraftPersistence.ocrFullTextIfAvailable(documentID: documentID) ?? ""
+            DispatchQueue.main.async {
+                ocrTextCache[documentID] = text
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("LibraryView refreshOCRCache documentID=\(documentID) chars=\(text.count)")
+                }
+            }
+        }
+    }
+
+// Section 3.1 Reload
     private func reloadDocuments() {
         documents = ScannerDocumentStore.listDocuments()
         thumbnailRefreshToken &+= 1
         if ScannerDebug.isEnabled {
             ScannerDebug.writeLog("LibraryView reloadDocuments count=\(documents.count) thumbToken=\(thumbnailRefreshToken)")
+        }
+
+        // If user is actively searching, warm OCR cache for current list.
+        if isSearching {
+            warmOCRCacheForSearch()
         }
     }
 
@@ -273,7 +437,7 @@ struct LibraryView: View {
         renameTarget = nil
     }
 
-// Section 3.5 Delete
+    // Section 3.5 Delete
     private func requestDelete(_ doc: ScannerDocumentMetadata) {
         deleteTarget = doc
         isShowingDeleteConfirm = true
@@ -594,3 +758,5 @@ private struct DocumentReviewRouteView: View {
 }
 
 // End of file: LibraryView.swift
+
+// End of LibraryView.swift
