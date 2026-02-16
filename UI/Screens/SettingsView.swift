@@ -64,7 +64,6 @@ struct SettingsView: View {
                         if ScannerDebug.isEnabled { ScannerDebug.writeLog("SettingsView: preset changed to \(newValue)") }
                     }
 
-                    Text("Planned: 3-tier presets (Fast / Balanced / Quality).")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.textSecondary)
                 }

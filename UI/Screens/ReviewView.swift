@@ -34,6 +34,14 @@ struct ReviewView: View {
     /// Track whether edits (rotate/reorder/delete/add) have occurred since last persistence.
     @State private var hasUnsavedEdits: Bool = false
 
+    // Section 2.1.2 Layout constants (Captured Pages container)
+    private let pagesListVisibleRowsMin: Int = 1
+    private let pagesListVisibleRowsMax: Int = 4
+    /// Approximate row height for a single page row (thumbnail + labels + actions).
+    private let pagesListRowHeight: CGFloat = 118
+    /// Small extra height to avoid clipping the last row separators/padding.
+    private let pagesListExtraHeight: CGFloat = 8
+
     // Section 2.1.0 Document identity
     @State private var currentDocumentID: UUID? = nil
 
@@ -131,6 +139,11 @@ struct ReviewView: View {
     }
 
     // Section 2.5.2.1 Pages list
+    private var pagesListTargetHeight: CGFloat {
+        let clampedCount = min(max(pages.count, pagesListVisibleRowsMin), pagesListVisibleRowsMax)
+        return CGFloat(clampedCount) * pagesListRowHeight + pagesListExtraHeight
+    }
+
     private var pagesList: some View {
         List {
             ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
@@ -150,8 +163,10 @@ struct ReviewView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .frame(minHeight: max(84, CGFloat(pages.count) * 92.0))
-        .environment(\.defaultMinListRowHeight, 84)
+        // Clamp container height to show 1–4 rows. List scrolls when pages > 4.
+        .frame(height: pagesListTargetHeight)
+        .scrollDisabled(pages.count <= pagesListVisibleRowsMax)
+        .environment(\.defaultMinListRowHeight, pagesListRowHeight)
     }
 
     // Section 2.6 Viewer presentation binding
@@ -294,8 +309,14 @@ struct ReviewView: View {
                 ScannerDebug.writeLog("[ReviewView] saveDraft ok. documentID=\(result.documentID.uuidString) pages=\(result.pageCount)")
             }
 
+            let preferredName = ScannerDraftPersistence.documentTitle(
+                documentID: result.documentID,
+                fileManager: fileManager
+            ) ?? "Scan"
+
             let pdfURL = try ScannerDraftPersistence.pdfURLForSharing(
                 documentID: result.documentID,
+                preferredFilename: preferredName,
                 fileManager: fileManager
             )
 

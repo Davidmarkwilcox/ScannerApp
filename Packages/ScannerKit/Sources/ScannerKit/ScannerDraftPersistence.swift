@@ -430,9 +430,105 @@ public enum ScannerDraftPersistence {
     }
 
 
+// Section 2.9.1 Public API (Share PDF with preferred filename)
+/// Returns a share-ready PDF URL whose *filename* matches the provided preferred filename.
+///
+/// Notes:
+/// - iOS share sheets typically use the `lastPathComponent` of the shared file URL as the default filename.
+/// - The persisted PDF path is canonical (`output/document.pdf`). To share with a custom name, we create a
+///   temporary copy using the desired filename and return that temporary URL.
+///
+/// - Parameters:
+///   - documentID: The document identifier.
+///   - preferredFilename: A human-friendly name (with or without ".pdf"). If empty/invalid, falls back to "document.pdf".
+///   - fileManager: The file manager to use.
+public static func pdfURLForSharing(
+    documentID: UUID,
+    preferredFilename: String?,
+    fileManager: FileManager = .default
+) throws -> URL {
+
+    // Ensure the canonical PDF exists (generates it if missing).
+    let canonicalPDFURL = try pdfURLForSharing(documentID: documentID, fileManager: fileManager)
+
+    // Sanitize + ensure .pdf extension.
+    let baseName = sanitizeShareFilename(preferredFilename) ?? "document"
+    let finalName = baseName.lowercased().hasSuffix(".pdf") ? baseName : "\(baseName).pdf"
+
+    // Build a deterministic temp location for the share copy.
+    let shareDir = fileManager.temporaryDirectory.appendingPathComponent("ScannerShare", isDirectory: true)
+    if !fileManager.fileExists(atPath: shareDir.path) {
+        try fileManager.createDirectory(at: shareDir, withIntermediateDirectories: true)
+    }
+
+    let shareURL = shareDir.appendingPathComponent(finalName, isDirectory: false)
+
+    // Replace any existing temp file (avoid share sheet showing stale content).
+    if fileManager.fileExists(atPath: shareURL.path) {
+        try? fileManager.removeItem(at: shareURL)
+    }
+
+    try fileManager.copyItem(at: canonicalPDFURL, to: shareURL)
+    debugLog("pdfURLForSharing(preferredFilename) -> \(shareURL.lastPathComponent)")
+
+    return shareURL
+}
+
+// Section 2.9.2 Public API (Metadata Title)
+/// Returns the persisted metadata title for a document, if available.
+public static func documentTitle(
+    documentID: UUID,
+    fileManager: FileManager = .default
+) -> String? {
+
+    do {
+        let paths = ScannerDocumentPaths(documentID: documentID)
+        let metadataURL = try paths.metadataURL(fileManager: fileManager)
+        guard fileManager.fileExists(atPath: metadataURL.path) else { return nil }
+
+        let data = try Data(contentsOf: metadataURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let metadata = try decoder.decode(ScannerDocumentMetadata.self, from: data)
+        return metadata.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    } catch {
+        return nil
+    }
+}
+
+// Section 2.9.3 Filename Sanitization
+private static func sanitizeShareFilename(_ raw: String?) -> String? {
+    guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+
+    // Remove a trailing .pdf (we will add it back consistently later).
+    var name = raw
+    if name.lowercased().hasSuffix(".pdf") {
+        name = String(name.dropLast(4))
+    }
+
+    // Replace path separators and other commonly illegal filename characters.
+    let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+    name = name.components(separatedBy: illegal).joined(separator: "_")
+
+    // Collapse whitespace runs.
+    name = name.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Avoid empty results.
+    guard !name.isEmpty else { return nil }
+
+    // Keep filenames reasonably short for share destinations.
+    if name.count > 80 {
+        name = String(name.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    return name
+}
 
 
-// Section 2.9.1 Public API (Share Images)
+
+
+// Section 2.10 Public API (Share Images)
 /// Returns the on-disk page image URLs for the given document, sorted in page order (001.jpg, 002.jpg, ...).
 /// - Notes:
 ///   - This does not generate anything. It simply returns persisted page JPEGs under /pages.

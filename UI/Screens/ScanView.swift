@@ -82,9 +82,6 @@ struct ScanView: View {
                         .transition(.opacity)
                 }
 
-                Text("Next: crop/reorder + draft persistence (Application Support/Scanner/Documents/<UUID>/...).")
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Colors.textSecondary)
             }
             .scannerGlassCard(padding: Theme.Spacing.lg)
             .animation(Theme.Motion.standard, value: scannedPages.count)

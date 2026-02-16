@@ -6,6 +6,8 @@
 // - Provides row actions: open/view, rename, delete, Share PDF, and Share Images.
 // - Share PDF will generate output/document.pdf on-demand (via ScannerKit) if missing.
 // - Share Images shares the persisted page JPEGs (pages/001.jpg, 002.jpg, ...).
+// - Rename defaults with the current name pre-selected for quick overwrite.
+//
 // Interactions:
 // - Uses ScannerKit.ScannerDocumentStore for listing/rename/delete.
 // - Uses ScannerKit.ScannerDraftPersistence.pdfURLForSharing(documentID:) to obtain/generate a PDF URL.
@@ -27,8 +29,6 @@ struct LibraryView: View {
     @State private var thumbnailRefreshToken: Int = 0
 
     // Section 2.2 Rename UI
-    @State private var isShowingRenameSheet: Bool = false
-    @State private var renameText: String = ""
     @State private var renameTarget: ScannerDocumentMetadata? = nil
 
     // Section 2.3 Delete UI
@@ -169,15 +169,13 @@ struct LibraryView: View {
                 Text("This will permanently delete “\(doc.title)” from this device.")
             }
             // Section 2.8 Rename sheet
-            .sheet(isPresented: $isShowingRenameSheet) {
+            .sheet(item: $renameTarget) { doc in
                 RenameDocumentSheet(
-                    initialTitle: renameText,
+                    initialTitle: doc.title,
                     onSave: { newTitle in
-                        renameText = newTitle
-                        performRename()
+                        performRename(documentID: doc.documentID, newTitle: newTitle)
                     },
                     onCancel: {
-                        isShowingRenameSheet = false
                         renameTarget = nil
                     }
                 )
@@ -214,7 +212,7 @@ struct LibraryView: View {
     // Section 3.2 Share PDF
     private func requestSharePDF(_ doc: ScannerDocumentMetadata) {
         do {
-            let url = try ScannerDraftPersistence.pdfURLForSharing(documentID: doc.documentID)
+            let url = try ScannerDraftPersistence.pdfURLForSharing(documentID: doc.documentID, preferredFilename: doc.title)
             shareItems = [url]
             isShowingShareSheet = true
             if ScannerDebug.isEnabled {
@@ -250,14 +248,14 @@ struct LibraryView: View {
     // Section 3.4 Rename
     private func requestRename(_ doc: ScannerDocumentMetadata) {
         renameTarget = doc
-        renameText = doc.title
-        isShowingRenameSheet = true
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("LibraryView requestRename documentID=\(doc.documentID.uuidString) title=\(doc.title)")
+        }
     }
 
-    private func performRename() {
-        guard let target = renameTarget else { return }
+    private func performRename(documentID: UUID, newTitle: String) {
         do {
-            let updated = try ScannerDocumentStore.renameDocument(documentID: target.documentID, newTitle: renameText)
+            let updated = try ScannerDocumentStore.renameDocument(documentID: documentID, newTitle: newTitle)
             if let idx = documents.firstIndex(where: { $0.documentID == updated.documentID }) {
                 documents[idx] = updated
             } else {
@@ -268,15 +266,14 @@ struct LibraryView: View {
             }
         } catch {
             if ScannerDebug.isEnabled {
-                ScannerDebug.writeLog("LibraryView Rename failed documentID=\(target.documentID.uuidString): \(error.localizedDescription)")
+                ScannerDebug.writeLog("LibraryView Rename failed documentID=\(documentID.uuidString): \(error.localizedDescription)")
             }
             reloadDocuments()
         }
-        isShowingRenameSheet = false
         renameTarget = nil
     }
 
-    // Section 3.5 Delete
+// Section 3.5 Delete
     private func requestDelete(_ doc: ScannerDocumentMetadata) {
         deleteTarget = doc
         isShowingDeleteConfirm = true
@@ -327,7 +324,7 @@ private struct RenameDocumentSheet: View {
 
     // Section 5.2 State
     @State private var text: String
-
+    @State private var shouldFocusTitleField: Bool = false
     // Section 5.3 Init
     init(initialTitle: String, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.initialTitle = initialTitle
@@ -344,8 +341,9 @@ private struct RenameDocumentSheet: View {
                     .font(Theme.Typography.headline)
                     .foregroundStyle(Theme.Colors.textPrimary)
 
-                TextField("Title", text: $text)
-                    .textFieldStyle(.roundedBorder)
+                // Section 5.4.1 Title field (auto-select all on focus)
+                SelectAllTextField("Title", text: $text, isFirstResponder: $shouldFocusTitleField)
+                    .frame(height: 44)
 
                 Spacer()
             }
@@ -365,18 +363,133 @@ private struct RenameDocumentSheet: View {
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .onAppear {
+                // Ensure the TextField always starts with the current title.
+                // (SwiftUI can reuse sheet views; resetting here avoids stale/empty text on first presentation.)
+                text = initialTitle
+                shouldFocusTitleField = false
+
+                // Defer focus by a tick so UIKit has the updated text before selecting.
+                DispatchQueue.main.async {
+                    shouldFocusTitleField = true
+                }
+
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("RenameDocumentSheet onAppear initialTitle=\(initialTitle)")
+                }
+            }
         }
     }
 }
 
-// Section 6. Thumbnail
+// Section 6. Select-all TextField (UIKit-backed)
+//
+// SwiftUI does not provide a reliable, public API to select all text in a TextField on appear.
+// This wrapper uses UITextField and calls selectAll when it becomes first responder.
+private struct SelectAllTextField: UIViewRepresentable {
+
+    // Section 6.1 Inputs
+    let placeholder: String
+    @Binding var text: String
+    @Binding var isFirstResponder: Bool
+
+    // Section 6.2 Init
+    init(_ placeholder: String, text: Binding<String>, isFirstResponder: Binding<Bool>) {
+        self.placeholder = placeholder
+        self._text = text
+        self._isFirstResponder = isFirstResponder
+    }
+
+    // Section 6.3 Coordinator
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: SelectAllTextField
+        var didSelectAllOnce: Bool = false
+
+        init(parent: SelectAllTextField) {
+            self.parent = parent
+        }
+
+        @objc func editingChanged(_ textField: UITextField) {
+            parent.text = textField.text ?? ""
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) {
+            // Keep SwiftUI state in sync for dictation / selection changes.
+            parent.text = textField.text ?? ""
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            // Select all the first time we become first responder for this presentation.
+            guard !didSelectAllOnce else { return }
+            didSelectAllOnce = true
+            DispatchQueue.main.async {
+                textField.selectAll(nil)
+            }
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("SelectAllTextField didBeginEditing -> selectAll")
+            }
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            return true
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    // Section 6.4 Make
+    func makeUIView(context: Context) -> UITextField {
+        let tf = UITextField(frame: .zero)
+        tf.placeholder = placeholder
+        tf.text = text
+        tf.borderStyle = .roundedRect
+        tf.autocorrectionType = .default
+        tf.autocapitalizationType = .sentences
+        tf.clearButtonMode = .whileEditing
+        tf.returnKeyType = .done
+        tf.delegate = context.coordinator
+        tf.addTarget(context.coordinator, action: #selector(Coordinator.editingChanged(_:)), for: .editingChanged)
+        return tf
+    }
+
+    // Section 6.5 Update
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+
+        // Drive first responder from SwiftUI state.
+        if isFirstResponder, !uiView.isFirstResponder {
+            uiView.becomeFirstResponder()
+
+            // Ensure selection happens even if didBeginEditing fires before text is set.
+            DispatchQueue.main.async {
+                uiView.selectAll(nil)
+            }
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("SelectAllTextField becomeFirstResponder -> selectAll")
+            }
+        } else if !isFirstResponder, uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("SelectAllTextField resignFirstResponder")
+            }
+        }
+    }
+}
+
+// Section 7. Thumbnail
 private struct LibraryThumbnailView: View {
 
-    // Section 6.1 Input
+    // Section 7.1 Input
     let documentID: UUID
     let refreshToken: Int
 
-    // Section 6.2 Body
+    // Section 7.2 Body
     var body: some View {
         Group {
             if let image = loadThumbnail(refreshToken: refreshToken) {
@@ -403,7 +516,7 @@ private struct LibraryThumbnailView: View {
         .id("\(documentID.uuidString)-\(refreshToken)")
     }
 
-    // Section 6.3 Loading
+    // Section 7.3 Loading
     private func loadThumbnail(refreshToken: Int) -> UIImage? {
         // Avoid potential image caching by loading bytes -> UIImage(data:).
         // refreshToken is intentionally unused except to influence view identity.
@@ -419,18 +532,18 @@ private struct LibraryThumbnailView: View {
     }
 }
 
-// Section 7. Viewer Route
+// Section 8. Viewer Route
 private struct DocumentReviewRouteView: View {
 
-    // Section 7.1 Input
+    // Section 8.1 Input
     let metadata: ScannerDocumentMetadata
 
-    // Section 7.2 State
+    // Section 8.2 State
     @State private var pages: [ScannerKit.ScannedPage] = []
     @State private var errorMessage: String? = nil
     @State private var isLoading: Bool = true
 
-    // Section 7.3 Body
+    // Section 8.3 Body
     var body: some View {
         Group {
             if isLoading {
@@ -467,7 +580,7 @@ private struct DocumentReviewRouteView: View {
         }
     }
 
-    // Section 7.4 Loading
+    // Section 8.4 Loading
     private func load() {
         guard isLoading else { return }
         do {
