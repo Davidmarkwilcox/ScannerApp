@@ -55,6 +55,7 @@
 		8A96EC482F38095100FFE256 /* DocumentCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentCamera.swift; sourceTree = "<group>"; };
 		8A96EC4A2F38096200FFE256 /* DocumentCameraCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentCameraCoordinator.swift; sourceTree = "<group>"; };
 		8A96EC652F3D776800FFE256 /* Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Debug.swift; sourceTree = "<group>"; };
+		8AF1377E2F43B667009D4BED /* ScannerOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerOCRService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -216,6 +217,7 @@
 				8A784DCC2F3EABDE00D6282C /* ScannerDocumentMetadata.swift */,
 				8A784DCD2F3EAD2500D6282C /* ScannerDocumentStore.swift */,
 				8A784DCE2F3EBD3000D6282C /* ScannerDocumentLoader.swift */,
+				8AF1377E2F43B667009D4BED /* ScannerOCRService.swift */,
 			);
 			path = ScannerKit;
 			sourceTree = "<group>";

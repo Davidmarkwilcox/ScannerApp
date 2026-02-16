@@ -30,6 +30,13 @@ public enum ScannerDraftPersistence {
         isDebugEnabled = enabled
     }
 
+    // Section 2.1.1 OCR debug toggle (default Off)
+    private static var isOCRDebugEnabled: Bool = false
+
+    public static func setOCRDebugEnabled(_ enabled: Bool) {
+        isOCRDebugEnabled = enabled
+    }
+
     // Section 2.2 Draft save result
     public struct DraftSaveResult {
         public let documentID: UUID
@@ -48,6 +55,11 @@ public enum ScannerDraftPersistence {
         case pdfRenderFailed(path: String)
         case failedToLoadPersistedPage(filename: String)
 
+        // OCR
+        case ocrWriteFailed(path: String)
+        case ocrReadFailed(path: String)
+        case ocrNotFound
+
         public var errorDescription: String? {
             switch self {
             case .emptyPages:
@@ -62,8 +74,62 @@ public enum ScannerDraftPersistence {
                 return "Failed to render PDF at: \(path)"
             case .failedToLoadPersistedPage(let filename):
                 return "Failed to load persisted page image: \(filename)"
+
+            case .ocrWriteFailed(let path):
+                return "Failed to write OCR results at: \(path)"
+            case .ocrReadFailed(let path):
+                return "Failed to read OCR results at: \(path)"
+            case .ocrNotFound:
+                return "No OCR results found for this document."
             }
         }
+    }
+
+    // Section 2.4.1 OCR payload (persisted)
+    public struct OCRResult: Codable, Equatable {
+        public struct PageText: Codable, Equatable {
+            public let pageIndex: Int
+            public let text: String
+
+            public init(pageIndex: Int, text: String) {
+                self.pageIndex = pageIndex
+                self.text = text
+            }
+        }
+
+        public let documentID: UUID
+        public let createdAt: Date
+        public let modifiedAt: Date
+        public let fullText: String
+        public let pages: [PageText]
+
+        public init(documentID: UUID, createdAt: Date, modifiedAt: Date, fullText: String, pages: [PageText]) {
+            self.documentID = documentID
+            self.createdAt = createdAt
+            self.modifiedAt = modifiedAt
+            self.fullText = fullText
+            self.pages = pages
+        }
+    }
+
+    // Section 2.4.2 OCR persistence helpers
+    private static func ocrURL(for documentID: UUID, fileManager: FileManager) throws -> URL {
+        let paths = ScannerDocumentPaths(documentID: documentID)
+        let root = try paths.documentRootURL(fileManager: fileManager)
+        return root.appendingPathComponent("ocr.json", isDirectory: false)
+    }
+
+    private static func makeOCREncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+
+    private static func makeOCRDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 
     // Section 2.4 Metadata helpers
@@ -506,6 +572,7 @@ private static func sanitizeShareFilename(_ raw: String?) -> String? {
         name = String(name.dropLast(4))
     }
 
+
     // Replace path separators and other commonly illegal filename characters.
     let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
     name = name.components(separatedBy: illegal).joined(separator: "_")
@@ -527,6 +594,84 @@ private static func sanitizeShareFilename(_ raw: String?) -> String? {
 
 
 
+
+
+
+// Section 2.9.4 OCR Persistence (Save)
+    /// Persists OCR results for a document to <documentRoot>/ocr.json.
+    /// - Note: This does not trigger OCR. Use `ScannerOCRService` for recognition.
+    @discardableResult
+    public static func saveOCRResult(
+        documentID: UUID,
+        fullText: String,
+        perPageText: [Int: String],
+        fileManager: FileManager = .default
+    ) throws -> OCRResult {
+
+        let now = Date()
+        let url = try ocrURL(for: documentID, fileManager: fileManager)
+
+        // Preserve createdAt if the OCR file already exists.
+        var createdAt = now
+        if fileManager.fileExists(atPath: url.path) {
+            if let existing = try? loadOCRResult(documentID: documentID, fileManager: fileManager) {
+                createdAt = existing.createdAt
+            }
+        }
+
+        let pages: [OCRResult.PageText] = perPageText
+            .map { OCRResult.PageText(pageIndex: $0.key, text: $0.value) }
+            .sorted { $0.pageIndex < $1.pageIndex }
+
+        let result = OCRResult(
+            documentID: documentID,
+            createdAt: createdAt,
+            modifiedAt: now,
+            fullText: fullText,
+            pages: pages
+        )
+
+        do {
+            let data = try makeOCREncoder().encode(result)
+            try data.write(to: url, options: [.atomic])
+            debugOCRLog("Saved OCR -> \(url.lastPathComponent) chars=\(fullText.count) pages=\(pages.count)")
+            return result
+        } catch {
+            debugOCRLog("ERROR saving OCR: \(error.localizedDescription)")
+            throw DraftError.ocrWriteFailed(path: url.path)
+        }
+    }
+
+    // Section 2.9.5 OCR Persistence (Load)
+    /// Loads OCR results for a document from <documentRoot>/ocr.json.
+    public static func loadOCRResult(
+        documentID: UUID,
+        fileManager: FileManager = .default
+    ) throws -> OCRResult {
+
+        let url = try ocrURL(for: documentID, fileManager: fileManager)
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw DraftError.ocrNotFound
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let decoded = try makeOCRDecoder().decode(OCRResult.self, from: data)
+            return decoded
+        } catch {
+            debugOCRLog("ERROR loading OCR: \(error.localizedDescription)")
+            throw DraftError.ocrReadFailed(path: url.path)
+        }
+    }
+
+    // Section 2.9.6 OCR Persistence (Convenience)
+    /// Returns the persisted OCR full text, if present.
+    public static func ocrFullTextIfAvailable(
+        documentID: UUID,
+        fileManager: FileManager = .default
+    ) -> String? {
+        return (try? loadOCRResult(documentID: documentID, fileManager: fileManager))?.fullText
+    }
 
 // Section 2.10 Public API (Share Images)
 /// Returns the on-disk page image URLs for the given document, sorted in page order (001.jpg, 002.jpg, ...).
@@ -566,6 +711,12 @@ public static func pageImageURLsForSharing(
     private static func debugLog(_ message: String) {
         guard isDebugEnabled else { return }
         print("ScannerDraftPersistence: \(message)")
+    }
+
+    // Section 2.10.1 OCR debug logging helper
+    private static func debugOCRLog(_ message: String) {
+        guard isOCRDebugEnabled else { return }
+        print("ScannerDraftPersistence[OCR]: \(message)")
     }
 }
 

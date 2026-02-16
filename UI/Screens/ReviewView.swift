@@ -34,6 +34,10 @@ struct ReviewView: View {
     /// Track whether edits (rotate/reorder/delete/add) have occurred since last persistence.
     @State private var hasUnsavedEdits: Bool = false
 
+    // Section 2.1.3 OCR UI state
+    @State private var isRecognizingText: Bool = false
+    @State private var lastRecognizedText: String = ""
+
     // Section 2.1.2 Layout constants (Captured Pages container)
     private let pagesListVisibleRowsMin: Int = 1
     private let pagesListVisibleRowsMax: Int = 4
@@ -67,7 +71,7 @@ struct ReviewView: View {
         }
         .scannerScreen()
         .navigationTitle("Review")
-        .toolbar { reviewToolbar }
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottomControlPanel }
         .fullScreenCover(isPresented: isViewerPresented) { viewerCover }
         .sheet(isPresented: $isPresentingCamera) { cameraSheet }
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
@@ -234,40 +238,86 @@ struct ReviewView: View {
         .ignoresSafeArea()
     }
 
-    // Section 3. Toolbar
-    @ToolbarContentBuilder
-    private var reviewToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigationBarLeading) {
-            Button { saveDraft() } label: {
-                Label("Save Draft", systemImage: "tray.and.arrow.down")
-            }
-            .tint(Theme.Colors.textPrimary)
-            .disabled(pages.isEmpty)
-        }
+    // Section 3.6 Bottom Control Panel
+    // Sits above the app's TabBar (Library / Scan / Settings) via safeAreaInset.
+    private var bottomControlPanel: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: Theme.Spacing.md) {
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button { exportPDFAndShare() } label: {
-                Label("Share PDF", systemImage: "square.and.arrow.up")
-            }
-            .tint(Theme.Colors.textPrimary)
-            .disabled(pages.isEmpty)
-        }
+                Button { saveDraft() } label: {
+                    Image(systemName: "tray.and.arrow.down")
+                        .imageScale(.large)
+                }
+                .disabled(pages.isEmpty)
+                .accessibilityLabel("Save")
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                isPresentingCamera = true
-                if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages tapped (preset=\(scanPresetRaw))") }
-            } label: {
-                Label("Add Pages", systemImage: "plus.viewfinder")
-            }
-            .tint(Theme.Colors.textPrimary)
-        }
+                Spacer()
 
-        ToolbarItem(placement: .navigationBarTrailing) {
-            EditButton()
-                .tint(Theme.Colors.textPrimary)
+                Button { exportPDFAndShare() } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .imageScale(.large)
+                }
+                .disabled(pages.isEmpty)
+                .accessibilityLabel("Share")
+
+                Spacer()
+
+                Menu {
+                    Button {
+                        Task { await recognizeText() }
+                    } label: {
+                        Label(isRecognizingText ? "Recognizing…" : "Recognize Text", systemImage: "text.viewfinder")
+                    }
+                    .disabled(pages.isEmpty || isRecognizingText)
+
+                    Button {
+                        copyRecognizedTextToClipboard()
+                    } label: {
+                        Label("Copy Text", systemImage: "doc.on.doc")
+                    }
+                    .disabled(pages.isEmpty)
+
+                } label: {
+                    Image(systemName: "text.magnifyingglass")
+                        .imageScale(.large)
+                }
+                .disabled(pages.isEmpty)
+                .accessibilityLabel("Text")
+
+                Spacer()
+
+                Button {
+                    isPresentingCamera = true
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages tapped (preset=\(scanPresetRaw))") }
+                } label: {
+                    Image(systemName: "plus.viewfinder")
+                        .imageScale(.large)
+                }
+                .accessibilityLabel("Add Pages")
+
+                Spacer()
+
+                Button {
+                    withAnimation {
+                        if editMode?.wrappedValue.isEditing == true {
+                            editMode?.wrappedValue = .inactive
+                        } else {
+                            editMode?.wrappedValue = .active
+                        }
+                    }
+                } label: {
+                    Text(editMode?.wrappedValue.isEditing == true ? "Done" : "Edit")
+                        .font(.body.weight(.semibold))
+                }
+                .accessibilityLabel("Edit")
+            }
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(.ultraThinMaterial)
         }
     }
+
 
     // Section 4. Actions
     private func saveDraft() {
@@ -348,6 +398,79 @@ struct ReviewView: View {
             saveDraftAlertMessage = error.localizedDescription
             isShowingSaveDraftAlert = true
         }
+    }
+
+    // Section 4.0.1 OCR
+    @MainActor
+    private func recognizeText() async {
+        guard !pages.isEmpty else { return }
+        guard !isRecognizingText else { return }
+
+        isRecognizingText = true
+        defer { isRecognizingText = false }
+
+        do {
+            // Ensure we have a stable document identity so OCR can be persisted.
+            let result = try ScannerDraftPersistence.saveDraft(documentID: currentDocumentID, pages: pages)
+            currentDocumentID = result.documentID
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView][OCR] Starting OCR. documentID=\(result.documentID.uuidString) pages=\(pages.count)")
+            }
+
+            let ocr = try await ScannerOCRService.recognizeText(pages: pages)
+            lastRecognizedText = ocr.fullText
+
+            _ = try ScannerDraftPersistence.saveOCRResult(
+                documentID: result.documentID,
+                fullText: ocr.fullText,
+                perPageText: ocr.perPageText
+            )
+
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView][OCR] OCR complete. chars=\(ocr.fullText.count)")
+            }
+
+            saveDraftAlertTitle = "Text Recognized"
+            saveDraftAlertMessage = "Recognized \(ocr.fullText.count) characters across \(pages.count) page(s).\n\nUse Text → Copy Text to copy to the clipboard."
+            isShowingSaveDraftAlert = true
+
+        } catch {
+            if ScannerDebug.isEnabled {
+                ScannerDebug.writeLog("[ReviewView][OCR] OCR failed: \(error.localizedDescription)")
+            }
+            saveDraftAlertTitle = "OCR Failed"
+            saveDraftAlertMessage = error.localizedDescription
+            isShowingSaveDraftAlert = true
+        }
+    }
+
+    private func copyRecognizedTextToClipboard() {
+        var textToCopy: String? = nil
+
+        let trimmed = lastRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            textToCopy = trimmed
+        } else if let docID = currentDocumentID {
+            textToCopy = ScannerDraftPersistence.ocrFullTextIfAvailable(documentID: docID)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard let finalText = textToCopy, !finalText.isEmpty else {
+            saveDraftAlertTitle = "No OCR Text"
+            saveDraftAlertMessage = "Run Text → Recognize Text first."
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        UIPasteboard.general.string = finalText
+
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("[ReviewView][OCR] Copied OCR text to clipboard. chars=\(finalText.count)")
+        }
+
+        saveDraftAlertTitle = "Copied"
+        saveDraftAlertMessage = "Copied \(finalText.count) characters to the clipboard."
+        isShowingSaveDraftAlert = true
     }
 
     private func rotate(pageID: UUID, clockwise: Bool) {
