@@ -58,14 +58,6 @@
 		8AF1377E2F43B667009D4BED /* ScannerOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerOCRService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		8A126C0A2F37CC1200DCE03F /* ScannerApp */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ScannerApp;
-			sourceTree = "<group>";
-		};
-/* End PBXFileSystemSynchronizedRootGroup section */
-
 /* Begin PBXFrameworksBuildPhase section */
 		8A126C052F37CC1200DCE03F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -88,7 +80,6 @@
 				8A126C212F37D1F100DCE03F /* Resources */,
 				8A126C202F37D1EA00DCE03F /* Data */,
 				8A126C1F2F37D1E100DCE03F /* Packages */,
-				8A126C0A2F37CC1200DCE03F /* ScannerApp */,
 				8A96EC5F2F3AD5FD00FFE256 /* Frameworks */,
 				8A126C092F37CC1200DCE03F /* Products */,
 			);
@@ -139,8 +130,6 @@
 		8A126C222F37D1FD00DCE03F /* Core */ = {
 			isa = PBXGroup;
 			children = (
-				8A126C262F37D23500DCE03F /* Models */,
-				8A126C252F37D22C00DCE03F /* Services */,
 				8A126C242F37D21E00DCE03F /* Persistence */,
 			);
 			path = Core;
@@ -151,7 +140,6 @@
 			children = (
 				8A96EC642F3D774D00FFE256 /* Utilities */,
 				8A126C292F37D25A00DCE03F /* Screens */,
-				8A126C282F37D24F00DCE03F /* Components */,
 				8A126C272F37D24700DCE03F /* Styles */,
 			);
 			path = UI;
@@ -165,33 +153,12 @@
 			path = Persistence;
 			sourceTree = "<group>";
 		};
-		8A126C252F37D22C00DCE03F /* Services */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
-		8A126C262F37D23500DCE03F /* Models */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
 		8A126C272F37D24700DCE03F /* Styles */ = {
 			isa = PBXGroup;
 			children = (
 				8A96EC332F37EAC500FFE256 /* Theme.swift */,
 			);
 			path = Styles;
-			sourceTree = "<group>";
-		};
-		8A126C282F37D24F00DCE03F /* Components */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Components;
 			sourceTree = "<group>";
 		};
 		8A126C292F37D25A00DCE03F /* Screens */ = {
@@ -305,9 +272,6 @@
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				8A126C0A2F37CC1200DCE03F /* ScannerApp */,
 			);
 			name = ScannerApp;
 			packageProductDependencies = (

@@ -21,6 +21,7 @@ import Foundation
 enum ScannerDebug {
     
     // Toggle debug mode globally.
+    //static var isEnabled: Bool = true
     static var isEnabled: Bool = false
     
     // Internal in-memory log buffer.
