@@ -23,6 +23,7 @@
 import SwiftUI
 import ScannerKit
 import UIKit
+import QuartzCore
 import PencilKit
 
 // MARK: - Section 2. ViewerView (SwiftUI)
@@ -421,6 +422,11 @@ private struct PencilMarkupZoomView: UIViewRepresentable {
         var pendingRestoreToken: UUID? = nil
         private var lastAppliedRestoreToken: UUID? = nil
 
+        // Viewport publish throttling (prevents excessive SwiftUI state churn during scroll/zoom)
+        private var lastPublishedZoom: CGFloat = -1
+        private var lastPublishedCenter: CGPoint = CGPoint(x: -1, y: -1)
+        private var lastViewportPublishTime: CFTimeInterval = 0
+
         var onDirtyChanged: ((Bool) -> Void)?
         var onDrawingChanged: ((PKDrawing) -> Void)?
         var onUndoRedoAvailabilityChanged: ((Bool, Bool) -> Void)?
@@ -443,11 +449,11 @@ private struct PencilMarkupZoomView: UIViewRepresentable {
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
             centerContent()
-            onViewportChanged?(scrollView.zoomScale, computeContentCenter(scrollView: scrollView))
+            publishViewportIfNeeded(scrollView: scrollView, reason: "didZoom")
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            onViewportChanged?(scrollView.zoomScale, computeContentCenter(scrollView: scrollView))
+            publishViewportIfNeeded(scrollView: scrollView, reason: "didScroll")
         }
 
         fileprivate func computeContentCenter(scrollView: UIScrollView) -> CGPoint {
@@ -462,6 +468,45 @@ private struct PencilMarkupZoomView: UIViewRepresentable {
 
             let z = max(scrollView.zoomScale, 0.0001)
             return CGPoint(x: visibleCenterX / z, y: visibleCenterY / z)
+        }
+
+        private func shouldPublishViewport(zoom: CGFloat, center: CGPoint) -> Bool {
+            // Epsilon thresholds to avoid spamming minor float jitter.
+            let zoomEps: CGFloat = 0.001
+            let centerEps: CGFloat = 0.5 // content-space points
+
+            if abs(zoom - lastPublishedZoom) > zoomEps { return true }
+            if abs(center.x - lastPublishedCenter.x) > centerEps { return true }
+            if abs(center.y - lastPublishedCenter.y) > centerEps { return true }
+            return false
+        }
+
+        private func publishViewportIfNeeded(scrollView: UIScrollView, reason: String) {
+            guard let onViewportChanged else { return }
+
+            let zoom = scrollView.zoomScale
+            let center = computeContentCenter(scrollView: scrollView)
+
+            // Throttle: cap publish rate to ~30 Hz.
+            let now = CACurrentMediaTime()
+            let minInterval: CFTimeInterval = 1.0 / 30.0
+            if now - lastViewportPublishTime < minInterval {
+                // Still allow a publish if a meaningful jump happened.
+                if !shouldPublishViewport(zoom: zoom, center: center) { return }
+            }
+
+            // Change detection
+            if !shouldPublishViewport(zoom: zoom, center: center) { return }
+
+            lastViewportPublishTime = now
+            lastPublishedZoom = zoom
+            lastPublishedCenter = center
+
+            onViewportChanged(zoom, center)
+
+            if debugEnabled {
+                ScannerDebug.writeLog("PencilMarkupZoomView viewport published (\(reason)) zoom=\(zoom) center=\(center)")
+            }
         }
 
         func restoreViewportIfNeeded(reason: String) {
@@ -540,6 +585,9 @@ private struct PencilMarkupZoomView: UIViewRepresentable {
                 lastPresentationID = id
                 userDidZoom = false
                 pendingFit = true
+                lastPublishedZoom = -1
+                lastPublishedCenter = CGPoint(x: -1, y: -1)
+                lastViewportPublishTime = 0
                 if debugEnabled { ScannerDebug.writeLog("PencilMarkupZoomView new presentationID=\(id.uuidString) -> reset") }
             }
         }
@@ -810,7 +858,10 @@ private struct PencilMarkupZoomView: UIViewRepresentable {
         context.coordinator.restoreViewportIfNeeded(reason: "updateUIView")
 
         // Publish current viewport snapshot.
-        context.coordinator.onViewportChanged?(uiView.zoomScale, context.coordinator.computeContentCenter(scrollView: uiView))
+        // NOTE: Intentionally skipped here to avoid SwiftUI state feedback loops during paging.
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("PencilMarkupZoomView viewport publish skipped (updateUIView)")
+        }
 
         if isMarkupMode {
             // Apply undo/redo commands triggered from SwiftUI toolbar.

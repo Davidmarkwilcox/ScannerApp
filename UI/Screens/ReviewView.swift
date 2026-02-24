@@ -13,6 +13,7 @@
 // Section 1. Imports
 import SwiftUI
 import UIKit
+import PhotosUI
 import ScannerKit
 
 // Section 2. View
@@ -22,6 +23,11 @@ struct ReviewView: View {
     @AppStorage("scanner.scanPreset") private var scanPresetRaw: String = "Balanced"
 
     @State private var isPresentingCamera: Bool = false
+
+    // Section 2.1.5 Import (Photos)
+    @State private var isPresentingPhotoPicker: Bool = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
+
     @State private var pages: [ScannerKit.ScannedPage]
 
     /// Selected page index for full-screen viewer presentation.
@@ -114,6 +120,16 @@ struct ReviewView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomControlPanel }
         .fullScreenCover(isPresented: isViewerPresented) { viewerCover }
         .sheet(isPresented: $isPresentingCamera) { cameraSheet }
+        .photosPicker(
+            isPresented: $isPresentingPhotoPicker,
+            selection: $photoPickerItems,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: photoPickerItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task { await importSelectedPhotos(items: newItems) }
+        }
         .alert(saveDraftAlertTitle, isPresented: $isShowingSaveDraftAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -296,7 +312,7 @@ struct ReviewView: View {
             HStack(spacing: Theme.Spacing.md) {
 
                 Button { saveDraft() } label: {
-                    Image(systemName: "tray.and.arrow.down")
+                    Image(systemName: "square.and.arrow.down")
                         .imageScale(.large)
                 }
                 .disabled(pages.isEmpty)
@@ -344,13 +360,25 @@ struct ReviewView: View {
 
                 Spacer()
 
-                Button {
-                    isPresentingCamera = true
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages tapped (preset=\(scanPresetRaw))") }
+                Menu {
+                    Button {
+                        isPresentingCamera = true
+                        if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages → Scan selected (preset=\(scanPresetRaw))") }
+                    } label: {
+                        Label("Scan Document", systemImage: "camera.viewfinder")
+                    }
+
+                    Button {
+                        isPresentingPhotoPicker = true
+                        if ScannerDebug.isEnabled { ScannerDebug.writeLog("[ReviewView] Add Pages → Import selected") }
+                    } label: {
+                        Label("Import from Photos", systemImage: "photo.on.rectangle")
+                    }
                 } label: {
                     Image(systemName: "plus.viewfinder")
                         .imageScale(.large)
                 }
+                .disabled(false)
                 .accessibilityLabel("Add Pages")
 
                 Spacer()
@@ -364,10 +392,12 @@ struct ReviewView: View {
                         }
                     }
                 } label: {
-                    Text(editMode?.wrappedValue.isEditing == true ? "Done" : "Edit")
-                        .font(.body.weight(.semibold))
+                    Image(systemName: editMode?.wrappedValue.isEditing == true
+                          ? "checkmark.circle"
+                          : "trash")
+                        .imageScale(.large)
                 }
-                .accessibilityLabel("Edit")
+                .accessibilityLabel(editMode?.wrappedValue.isEditing == true ? "Done Deleting" : "Delete Pages")
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.md)
@@ -628,6 +658,66 @@ struct ReviewView: View {
         }
 
         UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
+    // Section 4.0.3 Import (Photos)
+    @MainActor
+    private func importSelectedPhotos(items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+
+        let startIndex = pages.count
+        var imported: [ScannerKit.ScannedPage] = []
+        var failedCount: Int = 0
+
+        for (offset, item) in items.enumerated() {
+            do {
+                // Prefer Data to avoid forcing a specific image representation.
+                if let data = try await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+
+                    let page = ScannerKit.ScannedPage(
+                        id: UUID(),
+                        pageIndex: startIndex + offset,
+                        image: image,
+                        createdAt: Date()
+                    )
+                    imported.append(page)
+                } else {
+                    failedCount += 1
+                }
+            } catch {
+                failedCount += 1
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("[ReviewView] Import failed for item: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Clear selection so a user can re-import the same items later if needed.
+        photoPickerItems = []
+
+        guard !imported.isEmpty else {
+            saveDraftAlertTitle = "Import Failed"
+            saveDraftAlertMessage = "No images could be imported." + (failedCount > 0 ? " (Failed: \(failedCount))" : "")
+            isShowingSaveDraftAlert = true
+            return
+        }
+
+        pages.append(contentsOf: imported)
+        pages = ScannerKit.ScannedPage.reindexed(pages)
+
+        hasUnsavedEdits = true
+        viewerRefreshToken &+= 1
+
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("[ReviewView] Imported \(imported.count) image(s). failed=\(failedCount) total=\(pages.count) viewerRefreshToken=\(viewerRefreshToken)")
+        }
+
+        if failedCount > 0 {
+            saveDraftAlertTitle = "Imported with Warnings"
+            saveDraftAlertMessage = "Imported \(imported.count) image(s). Failed to import \(failedCount)."
+            isShowingSaveDraftAlert = true
+        }
     }
 
     private func rotate(pageID: UUID, clockwise: Bool) {

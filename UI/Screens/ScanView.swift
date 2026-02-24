@@ -7,6 +7,8 @@
 //
 // Section 1. Imports
 import SwiftUI
+import UIKit
+import PhotosUI
 import ScannerKit
 
 // Section 2. View
@@ -16,6 +18,11 @@ struct ScanView: View {
     @AppStorage("scanner.scanPreset") private var scanPresetRaw: String = "Balanced"
 
     @State private var isPresentingCamera: Bool = false
+
+    // Section 2.1.1 Import (Photos)
+    @State private var isPresentingPhotoPicker: Bool = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
+
     @State private var scannedPages: [ScannerKit.ScannedPage] = []
     @State private var lastErrorMessage: String? = nil
     @State private var navigateToReview: Bool = false
@@ -49,6 +56,15 @@ struct ScanView: View {
                     if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: present DocumentCamera (preset=\(scanPresetRaw))") }
                 } label: {
                     Label("Scan Document", systemImage: "camera.viewfinder")
+                }
+                .buttonStyle(ScannerPrimaryButtonStyle())
+
+                Button {
+                    lastErrorMessage = nil
+                    isPresentingPhotoPicker = true
+                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: present PhotosPicker") }
+                } label: {
+                    Label("Import from Photos", systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(ScannerPrimaryButtonStyle())
 
@@ -100,11 +116,18 @@ struct ScanView: View {
                 switch result {
                 case .success(let pages):
                     // Normalize to ScannerKit.ScannedPage to avoid module-type collisions
-                    scannedPages = pages.map { page in
+                    let newPages: [ScannerKit.ScannedPage] = pages.map { page in
                         ScannerKit.ScannedPage(id: page.id, pageIndex: page.pageIndex, image: page.image, createdAt: page.createdAt)
                     }
+
+                    let beforeCount = scannedPages.count
+                    scannedPages.append(contentsOf: newPages)
+                    scannedPages = ScannerKit.ScannedPage.reindexed(scannedPages)
+
                     lastErrorMessage = nil
-                    if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: captured \(scannedPages.count) pages") }
+                    if ScannerDebug.isEnabled {
+                        ScannerDebug.writeLog("ScanView: captured \(newPages.count) pages (before=\(beforeCount) total=\(scannedPages.count))")
+                    }
 
                 case .cancelled:
                     if ScannerDebug.isEnabled { ScannerDebug.writeLog("ScanView: camera cancelled") }
@@ -115,6 +138,71 @@ struct ScanView: View {
                 }
             }
             .ignoresSafeArea()
+        }
+        .photosPicker(
+            isPresented: $isPresentingPhotoPicker,
+            selection: $photoPickerItems,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: photoPickerItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            Task { await importSelectedPhotos(items: newItems) }
+        }
+    }
+
+    // Section 2.3 Import helpers
+    @MainActor
+    private func importSelectedPhotos(items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+
+        let startIndex = scannedPages.count
+        var imported: [ScannerKit.ScannedPage] = []
+        var failedCount: Int = 0
+
+        for (offset, item) in items.enumerated() {
+            do {
+                // Prefer Data to avoid forcing a specific image representation.
+                if let data = try await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+
+                    let page = ScannerKit.ScannedPage(
+                        id: UUID(),
+                        pageIndex: startIndex + offset,
+                        image: image,
+                        createdAt: Date()
+                    )
+                    imported.append(page)
+                } else {
+                    failedCount += 1
+                }
+            } catch {
+                failedCount += 1
+                if ScannerDebug.isEnabled {
+                    ScannerDebug.writeLog("ScanView: import failed: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Clear selection so a user can re-import the same items later if needed.
+        photoPickerItems = []
+
+        guard !imported.isEmpty else {
+            lastErrorMessage = "Import failed. No images could be imported." + (failedCount > 0 ? " (Failed: \(failedCount))" : "")
+            return
+        }
+
+        scannedPages.append(contentsOf: imported)
+        scannedPages = ScannerKit.ScannedPage.reindexed(scannedPages)
+
+        if failedCount > 0 {
+            lastErrorMessage = "Imported \(imported.count) image(s). Failed: \(failedCount)."
+        } else {
+            lastErrorMessage = nil
+        }
+
+        if ScannerDebug.isEnabled {
+            ScannerDebug.writeLog("ScanView: imported \(imported.count) image(s), failed=\(failedCount), total=\(scannedPages.count)")
         }
     }
 }
